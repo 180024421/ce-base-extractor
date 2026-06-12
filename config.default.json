@@ -10,5 +10,8 @@
   "module_blacklist": ["ntdll.dll", "kernel32.dll", "kernelbase.dll"],
   "required_end_offset": null,
   "cross_validate_min": 2,
-  "game_name": "game"
+  "game_name": "game",
+  "pointer_size": 8,
+  "target_pid": null,
+  "il2cpp_map_path": null
 }

@@ -1,125 +1,96 @@
-# CE 基址提取器 (ce-base-extractor)
-
-从 **Cheat Engine 指针扫描** 结果一键提取稳定基址，并生成 **Python 内存读取脚本**。默认针对 **雷电模拟器**（`dnplayer.exe`）优化。
-
-仓库：https://github.com/180024421/ce-base-extractor
-
-## 功能一览
-
-| 功能 | 说明 |
-|------|------|
-| SQLite / PTR 解析 | CE 导出文件一键分析 |
-| 雷电模拟器预设 | 优先 `libil2cpp.so`，附加 `dnplayer.exe` |
-| 多轮交叉验证 | 2～3 个 Rescan SQLite 取交集，找最稳基址 |
-| 模块白名单 | GUI 勾选只看指定模块 |
-| 模块统计 | 各模块指针数量与优先级 |
-| 导出 Python 脚本 | 内嵌内存读取器，直接 `python game_reader.py` |
-| 导出 CE 表 (.CT) | 双击导入 CE |
-| 收藏历史 | 按游戏名保存已验证基址 |
-| 监视导出目录 | 自动监视 `Documents\ce-exports\` |
-| GUI 测试读取 | 附加雷电进程，实时验证前 5 条 |
-
-## 快速开始
-
-### 1. 安装
-
-```powershell
-cd E:\xiangmu\ce-base-extractor
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-```
-
-或双击 `安装环境.cmd`。
-
-### 2. CE 操作（雷电模拟器）
-
-1. CE 附加到 `dnplayer.exe`（或游戏 Android 进程）
-2. 数值扫描 → 指针扫描 → **Rescan 2～3 次**
-3. 每次 Rescan 后：`File → Export to sqlite database`
-4. 建议保存到 `%USERPROFILE%\Documents\ce-exports\`
-
-### 3. 提取并生成 Python 脚本
-
-**GUI**：双击 `一键启动.cmd`
-
-1. 「交叉验证」页添加 2～3 个 SQLite →「交叉验证提取」
-2. 「单文件提取」页 →「导出 Python 脚本」
-3. 可选：勾选「监视导出目录」实现自动提取
-
-**命令行**：
-
-```powershell
-# 单文件
-.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --format py --game mygame
-
-# 交叉验证（3 个 Rescan 文件）
-.\.venv\Scripts\python -m ce_base_extractor rescan1.sqlite --cross rescan2.sqlite rescan3.sqlite --format py --game mygame
-
-# 只要 libil2cpp 模块
-.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --whitelist libil2cpp.so --format py
-```
-
-### 4. 运行 Python 脚本读取数据
-
-```powershell
-python mygame_reader.py
-python mygame_reader.py --chain chain_1
-python mygame_reader.py --list-modules
-```
-
-示例输出：
-
-```text
-chain_1: 12345  (libil2cpp.so+0x12345678)
-```
-
-## 生成的 Python 脚本说明
-
-脚本内嵌 `ProcessMemory` 类，通过 Windows API 附加雷电进程并解析指针链：
-
-```python
-# 自动附加 dnplayer.exe
-mem = ProcessMemory.auto_attach(PROCESS_NAMES)
-addr = mem.resolve_chain("libil2cpp.so", 0x12345678, [0x18, 0x20])
-value = mem.read_i32(addr)   # 读取 int32
-```
-
-支持类型：`int32`、`uint32`、`float`（在 CHAINS 配置中设置 `type` 字段）。
-
-## 配置
-
-`config.default.json` 或用户配置 `%USERPROFILE%\Documents\ce-exports\user_config.json`：
-
-| 字段 | 默认 | 说明 |
-|------|------|------|
-| `preset` | `ldplayer` | 模拟器预设 |
-| `max_depth` | 5 | 最大偏移层级 |
-| `max_single_offset` | 4096 | 单级偏移上限 |
-| `top_n` | 20 | 输出条数 |
-| `cross_validate_min` | 2 | 交叉验证最少出现次数 |
-| `module_blacklist` | 系统 DLL | 自动排除 |
-
-## 推荐工作流（雷电）
-
-```
-CE 扫描 → Rescan ×3 → 各导出 SQLite
-    ↓
-ce-base-extractor 交叉验证提取
-    ↓
-导出 mygame_reader.py
-    ↓
-python mygame_reader.py  →  拿到游戏数值
-    ↓
-集成到你的自动化脚本（script-control-center 等）
-```
-
-## 开发
-
-```powershell
-.\.venv\Scripts\python -m pytest tests -q
-```
-
-## 许可
-
-仅供学习与研究。请遵守游戏服务条款与当地法律法规。
-
+# CE 基址提取器 (ce-base-extractor)
+
+从 **Cheat Engine 指针扫描** 结果一键提取稳定基址，并生成 **Python 内存读取脚本**。默认针对 **雷电模拟器**（`dnplayer.exe`）优化。
+
+仓库：https://github.com/180024421/ce-base-extractor
+
+## 工作流
+
+```mermaid
+flowchart LR
+  A[CE 附加 dnplayer] --> B[指针扫描 + Rescan×3]
+  B --> C[导出 SQLite]
+  C --> D[交叉验证提取]
+  D --> E[设置字段名/类型]
+  E --> F[记录读数]
+  F --> G[重启雷电]
+  G --> H[重启验证]
+  H --> I[导出 Python / SCC JSON]
+  I --> J[python game_reader.py]
+```
+
+## 功能一览（v0.3）
+
+| 功能 | 说明 |
+|------|------|
+| 交叉验证 | 多 SQLite 流式取交集 |
+| 字段名/类型 | gold、hp + int32/float/int64 等 |
+| 雷电多开 | `--list-processes` / GUI 选 PID |
+| 重启验证 | 记录读数 → 重启 → 对比稳定性 |
+| Python 脚本 | 内嵌读取器，可直接运行 |
+| SCC JSON | 供 script-control-center 导入 |
+| Il2Cpp 映射 | json/cs 自动建议字段名 |
+| 压缩 PTR | 支持 compressed PTR 解析 |
+| 指针宽度 | 4 / 8 字节可切换 |
+| 首次向导 | 启动时快速指引 |
+| 打包 EXE | `build_exe.ps1` |
+
+## 快速开始
+
+```powershell
+cd E:\xiangmu\ce-base-extractor
+.\安装环境.cmd
+.\一键启动.cmd
+```
+
+### 命令行
+
+```powershell
+# 交叉验证 + Python + 指定 PID
+.\.venv\Scripts\python -m ce_base_extractor r1.sqlite --cross r2.sqlite r3.sqlite `
+  --format py --game mygame --pid 12345 --pointer-size 8
+
+# Il2Cpp 映射 + SCC 导出
+.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --il2cpp-map dump.json --format scc
+```
+
+### Python 脚本
+
+```powershell
+python mygame_reader.py --list-processes   # 雷电多开
+python mygame_reader.py --pid 12345
+python mygame_reader.py --chain gold
+```
+
+## 重启验证（GUI）
+
+1. 提取结果后为字段命名（双击或「编辑字段」）
+2. 点「记录读数」
+3. 重启雷电模拟器
+4. 点「重启验证」→ 稳定项自动标记 ✓ 并写入收藏
+
+## 示例
+
+见 [examples/README.md](examples/README.md)
+
+```powershell
+.\.venv\Scripts\python examples\make_sample_sqlite.py
+.\.venv\Scripts\python -m ce_base_extractor examples\sample_r1.sqlite --cross examples\sample_r2.sqlite --format py --game demo
+```
+
+## 打包 EXE
+
+```powershell
+.\build_exe.ps1
+# 输出: dist\CE基址提取器.exe
+```
+
+## 开发
+
+```powershell
+.\.venv\Scripts\python -m pytest tests -q
+```
+
+## 许可
+
+仅供学习与研究。请遵守游戏服务条款与当地法律法规。

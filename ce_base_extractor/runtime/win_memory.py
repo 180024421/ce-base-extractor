@@ -5,10 +5,11 @@ from __future__ import annotations
 import ctypes
 import struct
 from ctypes import wintypes
-from typing import Iterable
+from dataclasses import dataclass
+from typing import Callable, Iterable
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-psapi = ctypes.WinDLL("psapi", use_last_error=True)
+user32 = ctypes.WinDLL("user32", use_last_error=True)
 
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
@@ -16,6 +17,8 @@ TH32CS_SNAPPROCESS = 0x00000002
 TH32CS_SNAPMODULE = 0x00000008
 TH32CS_SNAPMODULE32 = 0x00000010
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
 class PROCESSENTRY32(ctypes.Structure):
@@ -48,9 +51,43 @@ class MODULEENTRY32(ctypes.Structure):
     ]
 
 
+@dataclass
+class ProcessInfo:
+    pid: int
+    name: str
+    window_title: str = ""
+
+    @property
+    def label(self) -> str:
+        if self.window_title:
+            return f"PID {self.pid} · {self.name} · {self.window_title}"
+        return f"PID {self.pid} · {self.name}"
+
+
 def _raise_last_error(msg: str) -> None:
     err = ctypes.get_last_error()
     raise OSError(err, f"{msg} (winerror={err})")
+
+
+def _window_titles_for_pid(pid: int) -> list[str]:
+    titles: list[str] = []
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        proc_id = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+        if int(proc_id.value) != pid:
+            return True
+        buf = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(hwnd, buf, 512)
+        text = buf.value.strip()
+        if text:
+            titles.append(text)
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return titles
 
 
 class ProcessMemory:
@@ -75,7 +112,7 @@ class ProcessMemory:
         self.close()
 
     @classmethod
-    def find_pid(cls, process_names: Iterable[str]) -> tuple[int, str]:
+    def list_matching(cls, process_names: Iterable[str]) -> list[ProcessInfo]:
         names = {n.lower() for n in process_names}
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
         if snap == INVALID_HANDLE_VALUE:
@@ -83,23 +120,44 @@ class ProcessMemory:
 
         entry = PROCESSENTRY32()
         entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+        found: list[ProcessInfo] = []
         try:
             if not kernel32.Process32First(snap, ctypes.byref(entry)):
                 _raise_last_error("Process32First 失败")
             while True:
-                exe = entry.szExeFile.decode("utf-8", errors="ignore").lower()
-                if exe in names:
-                    return int(entry.th32ProcessID), exe
+                exe = entry.szExeFile.decode("utf-8", errors="ignore")
+                if exe.lower() in names:
+                    pid = int(entry.th32ProcessID)
+                    titles = _window_titles_for_pid(pid)
+                    title = titles[0] if titles else ""
+                    found.append(ProcessInfo(pid=pid, name=exe, window_title=title))
                 if not kernel32.Process32Next(snap, ctypes.byref(entry)):
                     break
         finally:
             kernel32.CloseHandle(snap)
-        raise ProcessLookupError(f"未找到进程: {', '.join(process_names)}")
+        return found
 
     @classmethod
-    def auto_attach(cls, process_names: Iterable[str]) -> ProcessMemory:
-        pid, name = cls.find_pid(process_names)
-        return cls(pid, name)
+    def find_pid(cls, process_names: Iterable[str]) -> tuple[int, str]:
+        matches = cls.list_matching(process_names)
+        if not matches:
+            raise ProcessLookupError(f"未找到进程: {', '.join(process_names)}")
+        return matches[0].pid, matches[0].name
+
+    @classmethod
+    def auto_attach(
+        cls,
+        process_names: Iterable[str],
+        pid: int | None = None,
+    ) -> ProcessMemory:
+        if pid is not None:
+            matches = cls.list_matching(process_names)
+            for m in matches:
+                if m.pid == pid:
+                    return cls(m.pid, m.name)
+            return cls(pid, "unknown")
+        found_pid, name = cls.find_pid(process_names)
+        return cls(found_pid, name)
 
     def list_modules(self) -> dict[str, int]:
         snap = kernel32.CreateToolhelp32Snapshot(
@@ -128,7 +186,6 @@ class ProcessMemory:
         modules = self.list_modules()
         key = module_name.lower()
         if key not in modules:
-            # 模糊匹配（CE 模块名可能与枚举名略有差异）
             for name, base in modules.items():
                 if key in name or name in key:
                     return base
@@ -158,8 +215,14 @@ class ProcessMemory:
     def read_i32(self, address: int) -> int:
         return struct.unpack("<i", self.read_bytes(address, 4))[0]
 
+    def read_i64(self, address: int) -> int:
+        return struct.unpack("<q", self.read_bytes(address, 8))[0]
+
     def read_f32(self, address: int) -> float:
         return struct.unpack("<f", self.read_bytes(address, 4))[0]
+
+    def read_f64(self, address: int) -> float:
+        return struct.unpack("<d", self.read_bytes(address, 8))[0]
 
     def read_pointer(self, address: int, pointer_size: int = 8) -> int:
         if pointer_size == 8:
@@ -186,7 +249,7 @@ class ProcessMemory:
         return address
 
 
-def attach_ldplayer() -> ProcessMemory:
+def attach_ldplayer(pid: int | None = None) -> ProcessMemory:
     return ProcessMemory.auto_attach(
         (
             "dnplayer.exe",
@@ -194,5 +257,30 @@ def attach_ldplayer() -> ProcessMemory:
             "ldboxheadless.exe",
             "ldvboxheadless.exe",
             "ld9boxheadless.exe",
-        )
+        ),
+        pid=pid,
     )
+
+
+def read_chain_value(
+    mem: ProcessMemory,
+    chain: object,
+    pointer_size: int = 8,
+) -> int | float | bytes:
+    addr = mem.resolve_chain(
+        chain.module_name,
+        chain.module_offset,
+        chain.offsets,
+        pointer_size,
+    )
+    readers: dict[str, Callable[[], int | float | bytes]] = {
+        "int32": lambda: mem.read_i32(addr),
+        "uint32": lambda: mem.read_u32(addr),
+        "int64": lambda: mem.read_i64(addr),
+        "uint64": lambda: mem.read_u64(addr),
+        "float": lambda: mem.read_f32(addr),
+        "double": lambda: mem.read_f64(addr),
+        "bytes16": lambda: mem.read_bytes(addr, 16),
+    }
+    reader = readers.get(getattr(chain, "value_type", "int32"), readers["int32"])
+    return reader()

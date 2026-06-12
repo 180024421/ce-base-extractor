@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 
 
-@dataclass(frozen=True)
+@dataclass
 class PointerChain:
     """一条指针链：模块基址 + 偏移链。"""
 
@@ -12,10 +12,17 @@ class PointerChain:
     offsets: tuple[int, ...]
     score: float = 0.0
     source: str = ""
+    field_name: str = ""
+    value_type: str = "int32"
+    verified: bool = False
+    il2cpp_symbol: str = ""
 
     @property
     def depth(self) -> int:
         return len(self.offsets)
+
+    def export_name(self, fallback_index: int) -> str:
+        return self.field_name.strip() or f"chain_{fallback_index}"
 
     def dedupe_key(self) -> tuple:
         return (
@@ -40,6 +47,9 @@ class ExtractConfig:
     required_end_offset: int | None = None
     cross_validate_min: int = 0
     game_name: str = "game"
+    pointer_size: int = 8
+    target_pid: int | None = None
+    il2cpp_map_path: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> ExtractConfig:
@@ -57,3 +67,4 @@ class ExtractResult:
     ptrid: int | None = None
     cross_validate_meta: dict | None = None
     module_stats: list[dict] = field(default_factory=list)
+

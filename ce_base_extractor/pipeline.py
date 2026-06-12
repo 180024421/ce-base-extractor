@@ -6,6 +6,7 @@ from pathlib import Path
 from ce_base_extractor.export.formatter import save_result
 from ce_base_extractor.filters.cross_validate import cross_validate_files
 from ce_base_extractor.filters.scorer import filter_and_rank
+from ce_base_extractor.il2cpp.mapper import apply_il2cpp_hints, load_il2cpp_map
 from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
 from ce_base_extractor.parsers.ptr_parser import load_ptr
 from ce_base_extractor.parsers.sqlite_parser import load_sqlite
@@ -18,6 +19,19 @@ def _default_config_path() -> Path:
 
 def _user_config_path() -> Path:
     return Path.home() / "Documents" / "ce-exports" / "user_config.json"
+
+
+def _wizard_flag_path() -> Path:
+    return Path.home() / "Documents" / "ce-exports" / ".wizard_done"
+
+
+def wizard_completed() -> bool:
+    return _wizard_flag_path().is_file()
+
+
+def mark_wizard_done() -> None:
+    _wizard_flag_path().parent.mkdir(parents=True, exist_ok=True)
+    _wizard_flag_path().write_text("1", encoding="utf-8")
 
 
 def load_config(path: str | Path | None = None) -> ExtractConfig:
@@ -75,6 +89,10 @@ def extract(
         modules_seen = list(meta.get("modules", []))
         ptrid = meta.get("ptrid")
         source = str(input_path)
+
+    il2cpp_map = load_il2cpp_map(cfg.il2cpp_map_path)
+    if il2cpp_map:
+        chains = apply_il2cpp_hints(chains, il2cpp_map)
 
     ranked = filter_and_rank(chains, cfg)
     stats = compute_module_stats(chains, cfg.emulator_mode)

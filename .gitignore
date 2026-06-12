@@ -13,5 +13,7 @@ build/
 *.PTR
 *.ptr
 output/
+examples/sample_*.sqlite
+examples/*.reader.py
 .idea/
 .vscode/

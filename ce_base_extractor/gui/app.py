@@ -8,11 +8,16 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import format_ce_table, to_json, to_text
 from ce_base_extractor.export.python_script import save_python_script
-from ce_base_extractor.filters.presets import PRESETS
+from ce_base_extractor.export.scc_export import save_scc_json
+from ce_base_extractor.filters.presets import PRESETS, get_preset
+from ce_base_extractor.gui.chain_dialog import open_chain_editor
+from ce_base_extractor.gui.wizard import show_first_run_wizard
 from ce_base_extractor.history.store import HistoryStore
-from ce_base_extractor.models import ExtractConfig, ExtractResult
+from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
 from ce_base_extractor.parsers.sqlite_parser import list_ptrids
-from ce_base_extractor.pipeline import extract, load_config, save_config
+from ce_base_extractor.pipeline import extract, load_config, save_config, wizard_completed
+from ce_base_extractor.runtime.win_memory import ProcessMemory, read_chain_value
+from ce_base_extractor.verify.restart_verify import verify_restart_stability
 from ce_base_extractor.watch.folder_watcher import FolderWatcher
 
 try:
@@ -40,10 +45,14 @@ class App(tk.Tk):
         self._history = HistoryStore()
         self._watcher: FolderWatcher | None = None
         self._module_vars: dict[str, tk.BooleanVar] = {}
+        self._before_verify: dict[str, int | float | bytes] = {}
+        self._target_pid: int | None = self._config.target_pid
 
         self._build_ui()
         if _HAS_WINDND:
             windnd.hook_dropfiles(self, func=self._on_drop)
+        if not wizard_completed():
+            self.after(300, lambda: show_first_run_wizard(self))
 
     def _build_ui(self) -> None:
         header = ttk.Frame(self, padding=(12, 8))
@@ -82,9 +91,13 @@ class App(tk.Tk):
         row.pack(fill=tk.X)
         ttk.Button(row, text="选择 SQLite/PTR", command=self._browse).pack(side=tk.LEFT)
         ttk.Button(row, text="提取基址", command=self._run_extract).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="导出 Python 脚本", command=self._export_python).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="导出 .CT", command=self._export_ct).pack(side=tk.LEFT)
-        ttk.Button(row, text="测试读取", command=self._test_read).pack(side=tk.LEFT, padx=6)
+        ttk.Button(row, text="导出 Python", command=self._export_python).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="导出 SCC JSON", command=self._export_scc).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="导出 .CT", command=self._export_ct).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="选进程", command=self._pick_process).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="记录读数", command=self._snapshot_values).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="重启验证", command=self._restart_verify).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="测试读取", command=self._test_read).pack(side=tk.LEFT, padx=4)
 
         self.file_var = tk.StringVar(value="拖放或选择 CE 导出文件")
         ttk.Label(self._tab_extract, textvariable=self.file_var).pack(anchor=tk.W, pady=6)
@@ -100,6 +113,9 @@ class App(tk.Tk):
         self.game_name_var = tk.StringVar(value=self._config.game_name)
         self.ptrid_var = tk.StringVar(value="")
         self.end_offset_var = tk.StringVar(value="")
+        self.pointer_size_var = tk.IntVar(value=getattr(self._config, "pointer_size", 8))
+        self.il2cpp_var = tk.StringVar(value=self._config.il2cpp_map_path or "")
+        self.pid_label_var = tk.StringVar(value="进程: 自动")
 
         ttk.Label(opts, text="模拟器").grid(row=0, column=0, sticky=tk.W)
         ttk.Combobox(
@@ -129,6 +145,14 @@ class App(tk.Tk):
         ttk.Checkbutton(opts, text="模拟器模式", variable=self.emulator_var).grid(
             row=1, column=6, padx=(12, 0), pady=(6, 0)
         )
+        ttk.Label(opts, text="指针宽度").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+        ttk.Combobox(
+            opts, textvariable=self.pointer_size_var, values=("4", "8"), width=6, state="readonly"
+        ).grid(row=2, column=1, padx=4, pady=(6, 0), sticky=tk.W)
+        ttk.Label(opts, text="Il2Cpp 映射").grid(row=2, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0))
+        ttk.Entry(opts, textvariable=self.il2cpp_var, width=36).grid(row=2, column=3, columnspan=2, padx=4, pady=(6, 0))
+        ttk.Button(opts, text="浏览", command=self._browse_il2cpp).grid(row=2, column=5, pady=(6, 0))
+        ttk.Label(opts, textvariable=self.pid_label_var).grid(row=2, column=6, padx=(12, 0), pady=(6, 0), sticky=tk.W)
 
         paned = ttk.Panedwindow(self._tab_extract, orient=tk.VERTICAL)
         paned.pack(fill=tk.BOTH, expand=True, pady=6)
@@ -140,15 +164,17 @@ class App(tk.Tk):
 
         self.tree = ttk.Treeview(
             list_frame,
-            columns=("score", "module", "base", "depth", "source"),
+            columns=("score", "name", "type", "module", "base", "depth", "verified"),
             show="headings",
         )
         for col, title, w in (
-            ("score", "评分", 60),
-            ("module", "模块", 220),
-            ("base", "基址", 120),
-            ("depth", "层级", 50),
-            ("source", "来源", 100),
+            ("score", "评分", 50),
+            ("name", "字段名", 90),
+            ("type", "类型", 60),
+            ("module", "模块", 180),
+            ("base", "基址", 100),
+            ("depth", "层级", 40),
+            ("verified", "验证", 40),
         ):
             self.tree.heading(col, text=title)
             self.tree.column(col, width=w, anchor=tk.W)
@@ -156,7 +182,8 @@ class App(tk.Tk):
         sb = ttk.Scrollbar(list_frame, command=self.tree.yview)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.configure(yscrollcommand=sb.set)
-        self.tree.bind("<Double-1>", self._copy_selected_ce)
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
+        ttk.Button(list_frame, text="编辑字段", command=self._edit_selected_chain).pack(side=tk.BOTTOM, pady=4)
 
         self.detail = tk.Text(detail_frame, wrap=tk.WORD, font=("Consolas", 10))
         self.detail.pack(fill=tk.BOTH, expand=True)
@@ -286,6 +313,9 @@ class App(tk.Tk):
             required_end_offset=self._parse_end_offset(),
             cross_validate_min=self._config.cross_validate_min,
             game_name=self.game_name_var.get().strip() or "game",
+            pointer_size=int(self.pointer_size_var.get()),
+            target_pid=self._target_pid,
+            il2cpp_map_path=self.il2cpp_var.get().strip() or None,
         )
 
     def _on_drop(self, files: list[bytes]) -> None:
@@ -330,16 +360,19 @@ class App(tk.Tk):
 
         for item in self.tree.get_children():
             self.tree.delete(item)
-        for chain in result.chains:
+        for i, chain in enumerate(result.chains, 1):
             self.tree.insert(
                 "",
                 tk.END,
+                iid=str(i - 1),
                 values=(
                     f"{chain.score:.1f}",
+                    chain.export_name(i),
+                    chain.value_type,
                     chain.module_name,
                     f"0x{chain.module_offset:X}",
                     chain.depth,
-                    chain.source,
+                    "✓" if chain.verified else "",
                 ),
                 tags=(format_ce_table(chain),),
             )
@@ -411,6 +444,15 @@ class App(tk.Tk):
                 values=(stat["module"], stat["count"], stat["tier"], stat["avg_depth"]),
             )
 
+    def _on_tree_double_click(self, event) -> None:
+        region = self.tree.identify("region", event.x, event.y)
+        if region == "cell":
+            col = self.tree.identify_column(event.x)
+            if col in ("#2", "#3"):
+                self._edit_selected_chain()
+                return
+        self._copy_selected_ce()
+
     def _copy_selected_ce(self, _event=None) -> None:
         sel = self.tree.selection()
         if not sel:
@@ -420,6 +462,144 @@ class App(tk.Tk):
             self.clipboard_clear()
             self.clipboard_append(tags[0])
             self.status_var.set("已复制 CE 表达式")
+
+    def _edit_selected_chain(self) -> None:
+        if not self._result:
+            return
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先选择一条结果")
+            return
+        idx = int(sel[0])
+        if idx < 0 or idx >= len(self._result.chains):
+            return
+        updated = open_chain_editor(self, self._result.chains[idx], idx + 1)
+        if updated:
+            chains = list(self._result.chains)
+            chains[idx] = updated
+            self._result = ExtractResult(
+                chains=chains,
+                total_raw=self._result.total_raw,
+                total_after_filter=self._result.total_after_filter,
+                modules_seen=self._result.modules_seen,
+                source_file=self._result.source_file,
+                ptrid=self._result.ptrid,
+                cross_validate_meta=self._result.cross_validate_meta,
+                module_stats=self._result.module_stats,
+            )
+            self._populate_result(self._result)
+
+    def _browse_il2cpp(self) -> None:
+        path = filedialog.askopenfilename(
+            filetypes=[("Il2Cpp", "*.json *.cs *.txt"), ("所有", "*.*")]
+        )
+        if path:
+            self.il2cpp_var.set(path)
+
+    def _pick_process(self) -> None:
+        preset = get_preset(self.preset_var.get())
+        names = list(preset.process_names) if preset else ["dnplayer.exe"]
+        try:
+            processes = ProcessMemory.list_matching(names)
+        except OSError as exc:
+            messagebox.showerror("错误", str(exc))
+            return
+        if not processes:
+            messagebox.showwarning("提示", "未找到雷电进程，请先启动模拟器")
+            return
+        if len(processes) == 1:
+            self._target_pid = processes[0].pid
+            self.pid_label_var.set(f"进程: {processes[0].label}")
+            return
+        labels = [p.label for p in processes]
+        choice = simpledialog.askinteger(
+            "选择进程",
+            "多个模拟器实例，请输入序号:\n" + "\n".join(f"{i+1}. {l}" for i, l in enumerate(labels)),
+            minvalue=1,
+            maxvalue=len(labels),
+        )
+        if choice:
+            p = processes[choice - 1]
+            self._target_pid = p.pid
+            self.pid_label_var.set(f"进程: {p.label}")
+
+    def _snapshot_values(self) -> None:
+        if not self._result:
+            return
+        try:
+            preset = get_preset(self.preset_var.get())
+            names = list(preset.process_names) if preset else ["dnplayer.exe"]
+            mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            self._before_verify.clear()
+            with mem:
+                for i, chain in enumerate(self._result.chains, 1):
+                    name = chain.export_name(i)
+                    try:
+                        self._before_verify[name] = read_chain_value(
+                            mem, chain, int(self.pointer_size_var.get())
+                        )
+                    except Exception:
+                        pass
+            messagebox.showinfo("记录读数", f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」")
+        except Exception as exc:
+            messagebox.showerror("失败", str(exc))
+
+    def _restart_verify(self) -> None:
+        if not self._result or not self._before_verify:
+            messagebox.showwarning("提示", "请先点「记录读数」再重启模拟器")
+            return
+        results = verify_restart_stability(
+            self._result.chains,
+            self._before_verify,
+            preset_id=self.preset_var.get(),
+            pointer_size=int(self.pointer_size_var.get()),
+            pid=self._target_pid,
+        )
+        lines = []
+        verified_names: list[str] = []
+        chains = list(self._result.chains)
+        for i, r in enumerate(results):
+            status = "稳定 ✓" if r.stable else ("失败: " + r.error if r.error else f"变化 {r.before} → {r.after}")
+            name = chains[i].export_name(i + 1)
+            lines.append(f"{name}: {status}")
+            if r.stable:
+                verified_names.append(name)
+                chains[i] = PointerChain(
+                    module_name=chains[i].module_name,
+                    module_offset=chains[i].module_offset,
+                    offsets=chains[i].offsets,
+                    score=chains[i].score,
+                    source=chains[i].source,
+                    field_name=chains[i].field_name,
+                    value_type=chains[i].value_type,
+                    verified=True,
+                    il2cpp_symbol=chains[i].il2cpp_symbol,
+                )
+        self._result = ExtractResult(
+            chains=chains,
+            total_raw=self._result.total_raw,
+            total_after_filter=self._result.total_after_filter,
+            modules_seen=self._result.modules_seen,
+            source_file=self._result.source_file,
+            ptrid=self._result.ptrid,
+            cross_validate_meta=self._result.cross_validate_meta,
+            module_stats=self._result.module_stats,
+        )
+        self._populate_result(self._result)
+        game = self.game_name_var.get().strip() or "未命名游戏"
+        self._history.mark_verified(game, verified_names)
+        messagebox.showinfo("重启验证", "\n".join(lines[:15]))
+
+    def _export_scc(self) -> None:
+        if not self._result:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            initialfile=f"{self.game_name_var.get()}_bases_scc.json",
+        )
+        if path:
+            save_scc_json(self._result, path, preset_id=self.preset_var.get())
+            self.status_var.set(f"已导出 SCC: {path}")
 
     def _copy_all(self) -> None:
         if not self._result_text:
@@ -469,6 +649,8 @@ class App(tk.Tk):
             path,
             preset_id=self.preset_var.get(),
             game_name=self.game_name_var.get(),
+            pointer_size=int(self.pointer_size_var.get()),
+            target_pid=self._target_pid,
         )
         self.status_var.set(f"已生成 Python 脚本: {path}")
 
@@ -482,19 +664,15 @@ class App(tk.Tk):
 
             preset = get_preset(self.preset_var.get())
             names = list(preset.process_names) if preset else ["dnplayer.exe"]
-            mem = ProcessMemory.auto_attach(names)
+            mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            ps = int(self.pointer_size_var.get())
             lines: list[str] = []
             with mem:
-                for chain in self._result.chains[:5]:
+                for i, chain in enumerate(self._result.chains[:5], 1):
                     try:
-                        addr = mem.resolve_chain(
-                            chain.module_name,
-                            chain.module_offset,
-                            chain.offsets,
-                        )
-                        val = mem.read_i32(addr)
+                        val = read_chain_value(mem, chain, ps)
                         lines.append(
-                            f"{chain.module_name}+0x{chain.module_offset:X} → 0x{addr:X} = {val}"
+                            f"{chain.export_name(i)} ({chain.value_type}) = {val}"
                         )
                     except Exception as exc:
                         lines.append(f"{chain.module_name}: 失败 - {exc}")
