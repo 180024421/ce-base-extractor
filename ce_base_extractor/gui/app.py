@@ -3,16 +3,23 @@ from __future__ import annotations
 import tkinter as tk
 from dataclasses import asdict
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
+from ce_base_extractor.compare.sqlite_diff import diff_sqlite_files
+from ce_base_extractor.export.batch_export import export_all
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import format_ce_table, to_json, to_text
+from ce_base_extractor.export.frida_script import save_frida_script
 from ce_base_extractor.export.python_script import save_python_script
 from ce_base_extractor.export.scc_export import save_scc_json
 from ce_base_extractor.filters.presets import PRESETS, get_preset
 from ce_base_extractor.gui.chain_dialog import open_chain_editor
+from ce_base_extractor.gui.process_picker import pick_process
 from ce_base_extractor.gui.wizard import show_first_run_wizard
 from ce_base_extractor.history.store import HistoryStore
+from ce_base_extractor.io.scc_import import import_scc_to_result
+from ce_base_extractor.profiles.store import GameProfile, ProfileStore
+from ce_base_extractor.suggest.field_names import suggest_field_names
 from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
 from ce_base_extractor.parsers.sqlite_parser import list_ptrids
 from ce_base_extractor.pipeline import extract, load_config, save_config, wizard_completed
@@ -47,6 +54,9 @@ class App(tk.Tk):
         self._module_vars: dict[str, tk.BooleanVar] = {}
         self._before_verify: dict[str, int | float | bytes] = {}
         self._target_pid: int | None = self._config.target_pid
+        self._profiles = ProfileStore()
+        self._monitor_running = False
+        self._monitor_job: str | None = None
 
         self._build_ui()
         if _HAS_WINDND:
@@ -75,14 +85,20 @@ class App(tk.Tk):
         self._tab_cross = ttk.Frame(self.notebook, padding=8)
         self._tab_modules = ttk.Frame(self.notebook, padding=8)
         self._tab_history = ttk.Frame(self.notebook, padding=8)
+        self._tab_monitor = ttk.Frame(self.notebook, padding=8)
+        self._tab_profile = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(self._tab_extract, text="单文件提取")
         self.notebook.add(self._tab_cross, text="交叉验证")
         self.notebook.add(self._tab_modules, text="模块过滤")
+        self.notebook.add(self._tab_monitor, text="实时监控")
+        self.notebook.add(self._tab_profile, text="游戏配置")
         self.notebook.add(self._tab_history, text="收藏历史")
 
         self._build_extract_tab()
         self._build_cross_tab()
         self._build_modules_tab()
+        self._build_monitor_tab()
+        self._build_profile_tab()
         self._build_history_tab()
         self._build_footer()
 
@@ -98,6 +114,9 @@ class App(tk.Tk):
         ttk.Button(row, text="记录读数", command=self._snapshot_values).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="重启验证", command=self._restart_verify).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="测试读取", command=self._test_read).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="智能命名", command=self._auto_name).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="一键导出全部", command=self._export_all).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="导入SCC", command=self._import_scc).pack(side=tk.LEFT, padx=4)
 
         self.file_var = tk.StringVar(value="拖放或选择 CE 导出文件")
         ttk.Label(self._tab_extract, textvariable=self.file_var).pack(anchor=tk.W, pady=6)
@@ -198,6 +217,7 @@ class App(tk.Tk):
         ttk.Button(btns, text="添加文件", command=self._add_cross_file).pack(side=tk.LEFT)
         ttk.Button(btns, text="清空", command=self._clear_cross_files).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="交叉验证提取", command=self._run_cross_extract).pack(side=tk.LEFT)
+        ttk.Button(btns, text="对比两份SQLite", command=self._diff_sqlite).pack(side=tk.LEFT, padx=6)
 
         self.cross_list = tk.Listbox(self._tab_cross, height=8)
         self.cross_list.pack(fill=tk.BOTH, expand=True, pady=4)
@@ -237,6 +257,51 @@ class App(tk.Tk):
             self.stats_tree.heading(col, text=title)
             self.stats_tree.column(col, width=w, anchor=tk.W)
         self.stats_tree.pack(fill=tk.BOTH, expand=True)
+
+    def _build_monitor_tab(self) -> None:
+        row = ttk.Frame(self._tab_monitor)
+        row.pack(fill=tk.X)
+        self.monitor_interval_var = tk.IntVar(value=2)
+        ttk.Label(row, text="刷新间隔(秒)").pack(side=tk.LEFT)
+        ttk.Spinbox(row, from_=1, to=60, textvariable=self.monitor_interval_var, width=6).pack(
+            side=tk.LEFT, padx=6
+        )
+        self.monitor_btn = ttk.Button(row, text="开始监控", command=self._toggle_monitor)
+        self.monitor_btn.pack(side=tk.LEFT, padx=6)
+
+        self.monitor_tree = ttk.Treeview(
+            self._tab_monitor,
+            columns=("name", "value", "type", "updated"),
+            show="headings",
+            height=14,
+        )
+        for col, title, w in (
+            ("name", "字段", 120),
+            ("value", "当前值", 160),
+            ("type", "类型", 70),
+            ("updated", "时间", 90),
+        ):
+            self.monitor_tree.heading(col, text=title)
+            self.monitor_tree.column(col, width=w, anchor=tk.W)
+        self.monitor_tree.pack(fill=tk.BOTH, expand=True, pady=8)
+
+    def _build_profile_tab(self) -> None:
+        row = ttk.Frame(self._tab_profile)
+        row.pack(fill=tk.X, pady=4)
+        ttk.Button(row, text="保存当前为游戏配置", command=self._save_profile).pack(side=tk.LEFT)
+        ttk.Button(row, text="加载配置", command=self._load_profile).pack(side=tk.LEFT, padx=6)
+        ttk.Button(row, text="删除配置", command=self._delete_profile).pack(side=tk.LEFT)
+        ttk.Button(row, text="刷新列表", command=self._refresh_profiles).pack(side=tk.LEFT, padx=6)
+
+        self.profile_var = tk.StringVar()
+        ttk.Label(self._tab_profile, text="已保存的游戏配置").pack(anchor=tk.W, pady=(8, 0))
+        self.profile_combo = ttk.Combobox(
+            self._tab_profile, textvariable=self.profile_var, state="readonly"
+        )
+        self.profile_combo.pack(fill=tk.X)
+        self.profile_info = tk.Text(self._tab_profile, height=12, font=("Consolas", 10))
+        self.profile_info.pack(fill=tk.BOTH, expand=True, pady=8)
+        self._refresh_profiles()
 
     def _build_history_tab(self) -> None:
         row = ttk.Frame(self._tab_history)
@@ -507,21 +572,10 @@ class App(tk.Tk):
         if not processes:
             messagebox.showwarning("提示", "未找到雷电进程，请先启动模拟器")
             return
-        if len(processes) == 1:
-            self._target_pid = processes[0].pid
-            self.pid_label_var.set(f"进程: {processes[0].label}")
-            return
-        labels = [p.label for p in processes]
-        choice = simpledialog.askinteger(
-            "选择进程",
-            "多个模拟器实例，请输入序号:\n" + "\n".join(f"{i+1}. {l}" for i, l in enumerate(labels)),
-            minvalue=1,
-            maxvalue=len(labels),
-        )
-        if choice:
-            p = processes[choice - 1]
-            self._target_pid = p.pid
-            self.pid_label_var.set(f"进程: {p.label}")
+        picked = pick_process(self, processes)
+        if picked:
+            self._target_pid = picked.pid
+            self.pid_label_var.set(f"进程: {picked.label}")
 
     def _snapshot_values(self) -> None:
         if not self._result:
@@ -741,6 +795,173 @@ class App(tk.Tk):
         )
         self.status_var.set(f"已从收藏导出: {path}")
 
+    def _auto_name(self) -> None:
+        if not self._result:
+            return
+        chains = suggest_field_names(self._result.chains)
+        self._result = ExtractResult(
+            chains=chains,
+            total_raw=self._result.total_raw,
+            total_after_filter=self._result.total_after_filter,
+            modules_seen=self._result.modules_seen,
+            source_file=self._result.source_file,
+            ptrid=self._result.ptrid,
+            cross_validate_meta=self._result.cross_validate_meta,
+            module_stats=self._result.module_stats,
+        )
+        self._populate_result(self._result)
+        self.status_var.set("已应用智能字段命名")
+
+    def _export_all(self) -> None:
+        if not self._result:
+            messagebox.showwarning("提示", "请先提取结果")
+            return
+        folder = filedialog.askdirectory(initialdir=str(WATCH_DIR))
+        if not folder:
+            return
+        game = self.game_name_var.get().strip() or "game"
+        files = export_all(
+            self._result,
+            folder,
+            game_name=game,
+            preset_id=self.preset_var.get(),
+            pointer_size=int(self.pointer_size_var.get()),
+            target_pid=self._target_pid,
+        )
+        messagebox.showinfo("导出完成", f"已导出 {len(files)} 个文件到:\n{folder}")
+
+    def _import_scc(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("SCC JSON", "*.json")])
+        if not path:
+            return
+        try:
+            result = import_scc_to_result(path)
+            self._populate_result(result)
+            self.status_var.set(f"已导入: {Path(path).name}")
+        except Exception as exc:
+            messagebox.showerror("导入失败", str(exc))
+
+    def _diff_sqlite(self) -> None:
+        if len(self._extra_files) < 2:
+            a = filedialog.askopenfilename(title="SQLite A", filetypes=[("SQLite", "*.sqlite *.db")])
+            b = filedialog.askopenfilename(title="SQLite B", filetypes=[("SQLite", "*.sqlite *.db")])
+            if not a or not b:
+                return
+            fa, fb = Path(a), Path(b)
+        else:
+            fa, fb = self._extra_files[0], self._extra_files[1]
+        try:
+            diff = diff_sqlite_files(fa, fb, ptrid=self._parse_ptrid())
+            msg = (
+                f"A: {diff['count_a']} 条\nB: {diff['count_b']} 条\n"
+                f"共同: {diff['common']} 条\n仅A: {diff['only_a']} 仅B: {diff['only_b']}\n"
+                f"稳定率: {diff['stability_ratio']*100:.1f}%"
+            )
+            messagebox.showinfo("SQLite 对比", msg)
+        except Exception as exc:
+            messagebox.showerror("对比失败", str(exc))
+
+    def _toggle_monitor(self) -> None:
+        if self._monitor_running:
+            self._stop_monitor()
+        else:
+            self._start_monitor()
+
+    def _start_monitor(self) -> None:
+        if not self._result or not self._result.chains:
+            messagebox.showwarning("提示", "请先提取结果")
+            return
+        self._monitor_running = True
+        self.monitor_btn.configure(text="停止监控")
+        self._monitor_tick()
+
+    def _stop_monitor(self) -> None:
+        self._monitor_running = False
+        self.monitor_btn.configure(text="开始监控")
+        if self._monitor_job:
+            self.after_cancel(self._monitor_job)
+            self._monitor_job = None
+
+    def _monitor_tick(self) -> None:
+        if not self._monitor_running or not self._result:
+            return
+        from datetime import datetime
+
+        try:
+            preset = get_preset(self.preset_var.get())
+            names = list(preset.process_names) if preset else ["dnplayer.exe"]
+            mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            ps = int(self.pointer_size_var.get())
+            now = datetime.now().strftime("%H:%M:%S")
+            with mem:
+                for item in self.monitor_tree.get_children():
+                    self.monitor_tree.delete(item)
+                for i, chain in enumerate(self._result.chains, 1):
+                    name = chain.export_name(i)
+                    try:
+                        val = read_chain_value(mem, chain, ps)
+                        self.monitor_tree.insert(
+                            "", tk.END, values=(name, val, chain.value_type, now)
+                        )
+                    except Exception as exc:
+                        self.monitor_tree.insert(
+                            "", tk.END, values=(name, f"ERR: {exc}", chain.value_type, now)
+                        )
+        except Exception as exc:
+            self.status_var.set(f"监控错误: {exc}")
+
+        interval = max(1, int(self.monitor_interval_var.get())) * 1000
+        self._monitor_job = self.after(interval, self._monitor_tick)
+
+    def _refresh_profiles(self) -> None:
+        games = self._profiles.list_games()
+        self.profile_combo["values"] = games
+        if games and not self.profile_var.get():
+            self.profile_var.set(games[0])
+
+    def _save_profile(self) -> None:
+        if not self._result:
+            return
+        game = self.game_name_var.get().strip() or "未命名游戏"
+        profile = GameProfile.from_result(
+            self._result,
+            game_name=game,
+            preset=self.preset_var.get(),
+            pointer_size=int(self.pointer_size_var.get()),
+            target_pid=self._target_pid,
+        )
+        path = self._profiles.save(profile)
+        self._refresh_profiles()
+        self.profile_var.set(game)
+        messagebox.showinfo("游戏配置", f"已保存: {path}")
+
+    def _load_profile(self) -> None:
+        game = self.profile_var.get()
+        if not game:
+            return
+        try:
+            profile = self._profiles.load(game)
+            self.game_name_var.set(profile.game_name)
+            self.preset_var.set(profile.preset)
+            self.pointer_size_var.set(str(profile.pointer_size))
+            self._target_pid = profile.target_pid
+            result = profile.to_result()
+            self._populate_result(result)
+            self.profile_info.delete("1.0", tk.END)
+            self.profile_info.insert(tk.END, f"已加载 {game}\n链数: {len(result.chains)}\n")
+            self.status_var.set(f"已加载游戏配置: {game}")
+        except Exception as exc:
+            messagebox.showerror("加载失败", str(exc))
+
+    def _delete_profile(self) -> None:
+        game = self.profile_var.get()
+        if not game:
+            return
+        if messagebox.askyesno("确认", f"删除配置「{game}」?"):
+            self._profiles.delete(game)
+            self.profile_var.set("")
+            self._refresh_profiles()
+
     def _save_user_config(self) -> None:
         cfg = self._current_config()
         path = save_config(cfg)
@@ -772,6 +993,7 @@ class App(tk.Tk):
             self.status_var.set(f"自动提取失败: {exc}")
 
     def destroy(self) -> None:
+        self._stop_monitor()
         if self._watcher:
             self._watcher.stop()
         super().destroy()

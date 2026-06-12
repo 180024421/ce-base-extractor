@@ -19,20 +19,23 @@ flowchart LR
   I --> J[python game_reader.py]
 ```
 
-## 功能一览（v0.3）
+## 功能一览（v0.4）
 
 | 功能 | 说明 |
 |------|------|
 | 交叉验证 | 多 SQLite 流式取交集 |
-| 字段名/类型 | gold、hp + int32/float/int64 等 |
-| 雷电多开 | `--list-processes` / GUI 选 PID |
-| 重启验证 | 记录读数 → 重启 → 对比稳定性 |
-| Python 脚本 | 内嵌读取器，可直接运行 |
-| SCC JSON | 供 script-control-center 导入 |
+| 字段名/类型 | 自定义 gold/hp + int32/float 等 |
+| **智能命名** | 一键根据模块/偏移建议字段名 |
+| **实时监控** | GUI 定时刷新内存数值 |
+| **游戏配置** | 保存/加载完整基址方案 |
+| **一键导出全部** | py + scc + ct + json + frida + module |
+| **SCC 导入** | 从 JSON 反向加载到 GUI |
+| **SQLite 对比** | 两份扫描结果差异统计 |
+| **Frida 脚本** | 导出 `*_frida.js` |
+| **可 import 模块** | `*_memory.py` 供脚本引用 |
+| 雷电多开 | 进程列表对话框选 PID |
+| 重启验证 | 记录读数 → 重启 → 对比 |
 | Il2Cpp 映射 | json/cs 自动建议字段名 |
-| 压缩 PTR | 支持 compressed PTR 解析 |
-| 指针宽度 | 4 / 8 字节可切换 |
-| 首次向导 | 启动时快速指引 |
 | 打包 EXE | `build_exe.ps1` |
 
 ## 快速开始
@@ -46,12 +49,13 @@ cd E:\xiangmu\ce-base-extractor
 ### 命令行
 
 ```powershell
-# 交叉验证 + Python + 指定 PID
+# 交叉验证 + 一键导出全部格式
 .\.venv\Scripts\python -m ce_base_extractor r1.sqlite --cross r2.sqlite r3.sqlite `
-  --format py --game mygame --pid 12345 --pointer-size 8
+  --format all --game mygame -o ./mygame_export
 
-# Il2Cpp 映射 + SCC 导出
-.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --il2cpp-map dump.json --format scc
+# Frida / 可 import 模块
+.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --format frida --game mygame
+.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --format module --game mygame
 ```
 
 ### Python 脚本
