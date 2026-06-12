@@ -1,0 +1,8 @@
+{
+  "max_depth": 5,
+  "max_single_offset": 4096,
+  "top_n": 20,
+  "min_score": 0.0,
+  "dedupe": true,
+  "emulator_mode": true
+}
