@@ -21,5 +21,6 @@ def test_python_script_contains_reader():
     assert "dnplayer.exe" in code
     assert "gold" in code
     assert "TARGET_PID = 1234" in code
-    assert "read_i64" in code
+    assert "resolve_chain" in code
+    assert "standalone_reader" not in code or "class ProcessMemory" in code
     assert "--list-processes" in code

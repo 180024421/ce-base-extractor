@@ -1,88 +1,1 @@
-from __future__ import annotations
-
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
-from ce_base_extractor.models import PointerChain
-
-
-def _history_path() -> Path:
-    base = Path.home() / "Documents" / "ce-exports"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "favorites.json"
-
-
-class HistoryStore:
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or _history_path()
-        self._data: dict = {"games": {}}
-        self._load()
-
-    def _load(self) -> None:
-        if self.path.is_file():
-            self._data = json.loads(self.path.read_text(encoding="utf-8"))
-        if "games" not in self._data:
-            self._data["games"] = {}
-
-    def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-    def list_games(self) -> list[str]:
-        return sorted(self._data["games"].keys())
-
-    def get_chains(self, game: str) -> list[dict]:
-        return list(self._data["games"].get(game, []))
-
-    def add_chains(self, game: str, chains: list[PointerChain], note: str = "") -> int:
-        game = game.strip() or "未命名游戏"
-        entries = self._data["games"].setdefault(game, [])
-        added = 0
-        existing = {
-            (e["module"], e["module_offset"], tuple(e["offsets"]))
-            for e in entries
-        }
-        now = datetime.now(timezone.utc).isoformat()
-        for i, chain in enumerate(chains, 1):
-            key = (chain.module_name, chain.module_offset, chain.offsets)
-            if key in existing:
-                continue
-            entries.append(
-                {
-                    "module": chain.module_name,
-                    "module_offset": chain.module_offset,
-                    "offsets": list(chain.offsets),
-                    "score": chain.score,
-                    "field_name": chain.export_name(i),
-                    "value_type": chain.value_type,
-                    "verified": chain.verified,
-                    "il2cpp_symbol": chain.il2cpp_symbol,
-                    "note": note,
-                    "saved_at": now,
-                }
-            )
-            existing.add(key)
-            added += 1
-        self._save()
-        return added
-
-    def mark_verified(self, game: str, field_names: list[str]) -> int:
-        entries = self._data["games"].get(game, [])
-        names = set(field_names)
-        count = 0
-        for e in entries:
-            if e.get("field_name") in names:
-                e["verified"] = True
-                count += 1
-        if count:
-            self._save()
-        return count
-
-    def remove_game(self, game: str) -> None:
-        self._data["games"].pop(game, None)
-        self._save()
-
+from __future__ import annotationsimport jsonfrom datetime import datetime, timezonefrom pathlib import Pathfrom ce_base_extractor.models import PointerChaindef _history_path() -> Path:    base = Path.home() / "Documents" / "ce-exports"    base.mkdir(parents=True, exist_ok=True)    return base / "favorites.json"class HistoryStore:    def __init__(self, path: Path | None = None) -> None:        self.path = path or _history_path()        self._data: dict = {"games": {}}        self._load()    def _load(self) -> None:        if self.path.is_file():            self._data = json.loads(self.path.read_text(encoding="utf-8"))        if "games" not in self._data:            self._data["games"] = {}    def _save(self) -> None:        self.path.parent.mkdir(parents=True, exist_ok=True)        self.path.write_text(            json.dumps(self._data, ensure_ascii=False, indent=2),            encoding="utf-8",        )    def list_games(self) -> list[str]:        return sorted(self._data["games"].keys())    def get_chains(self, game: str) -> list[dict]:        return list(self._data["games"].get(game, []))    def add_chains(self, game: str, chains: list[PointerChain], note: str = "") -> int:        game = game.strip() or "未命名游戏"        entries = self._data["games"].setdefault(game, [])        added = 0        existing = {(e["module"], e["module_offset"], tuple(e["offsets"])) for e in entries}        now = datetime.now(timezone.utc).isoformat()        for i, chain in enumerate(chains, 1):            key = (chain.module_name, chain.module_offset, chain.offsets)            if key in existing:                continue            entries.append(                {                    "module": chain.module_name,                    "module_offset": chain.module_offset,                    "offsets": list(chain.offsets),                    "score": chain.score,                    "field_name": chain.export_name(i),                    "value_type": chain.value_type,                    "verified": chain.verified,                    "il2cpp_symbol": chain.il2cpp_symbol,                    "note": note,                    "saved_at": now,                }            )            existing.add(key)            added += 1        self._save()        return added    def mark_verified(self, game: str, field_names: list[str]) -> int:        entries = self._data["games"].get(game, [])        names = set(field_names)        count = 0        for e in entries:            if e.get("field_name") in names:                e["verified"] = True                count += 1        if count:            self._save()        return count    def remove_game(self, game: str) -> None:        self._data["games"].pop(game, None)        self._save()

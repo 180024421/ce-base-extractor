@@ -7,9 +7,13 @@ def _make_db(tmp_path, name, module_offset):
 
     db = tmp_path / name
     conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE pointerfiles (ptrid INTEGER PRIMARY KEY, name TEXT, maxlevel INTEGER)")
+    conn.execute(
+        "CREATE TABLE pointerfiles (ptrid INTEGER PRIMARY KEY, name TEXT, maxlevel INTEGER)"
+    )
     conn.execute("INSERT INTO pointerfiles VALUES (1, 'scan', 4)")
-    conn.execute("CREATE TABLE modules (ptrid INTEGER, moduleid INTEGER, name TEXT, PRIMARY KEY (ptrid, moduleid))")
+    conn.execute(
+        "CREATE TABLE modules (ptrid INTEGER, moduleid INTEGER, name TEXT, PRIMARY KEY (ptrid, moduleid))"
+    )
     conn.execute("INSERT INTO modules VALUES (1, 0, 'libil2cpp.so')")
     conn.execute(
         "CREATE TABLE results (ptrid INTEGER, resultid INTEGER, offsetcount INTEGER, "
@@ -34,6 +38,7 @@ def test_cross_validate_finds_stable(tmp_path):
     assert len(stable) == 1
     assert stable[0].module_offset == 0x1000
     assert meta["stable_keys"] == 1
+    assert "stability_ratio" in meta
 
 
 def test_extract_with_cross(tmp_path):

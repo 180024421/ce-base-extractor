@@ -33,9 +33,7 @@ def chains_to_ct(
     for i, chain in enumerate(chains, 1):
         entry = ET.SubElement(entries_parent, "CheatEntry")
         ET.SubElement(entry, "ID").text = str(i)
-        ET.SubElement(entry, "Description").text = (
-            f"{chain.module_name}+0x{chain.module_offset:X}"
-        )
+        ET.SubElement(entry, "Description").text = f"{chain.module_name}+0x{chain.module_offset:X}"
         ET.SubElement(entry, "VariableType").text = "4 Bytes"
         ET.SubElement(entry, "Address").text = format_ce_table(chain)
 

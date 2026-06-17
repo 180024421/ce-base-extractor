@@ -1,4 +1,5 @@
 """生成示例 CE SQLite 供本地试跑。"""
+
 from __future__ import annotations
 
 import sqlite3
@@ -9,7 +10,9 @@ ROOT = Path(__file__).resolve().parent
 
 def _write(db: Path, module_offset: int) -> None:
     conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE pointerfiles (ptrid INTEGER PRIMARY KEY, name TEXT, maxlevel INTEGER)")
+    conn.execute(
+        "CREATE TABLE pointerfiles (ptrid INTEGER PRIMARY KEY, name TEXT, maxlevel INTEGER)"
+    )
     conn.execute("INSERT INTO pointerfiles VALUES (1, 'demo', 4)")
     conn.execute(
         "CREATE TABLE modules (ptrid INTEGER, moduleid INTEGER, name TEXT, PRIMARY KEY (ptrid, moduleid))"

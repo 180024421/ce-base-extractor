@@ -11,6 +11,8 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 .\.venv\Scripts\pyinstaller --noconfirm --onefile --windowed `
     --name "CE基址提取器" `
     --add-data "config.default.json;." `
-    -m ce_base_extractor --gui
+    --hidden-import ce_base_extractor.runtime.standalone_reader `
+    --collect-submodules ce_base_extractor `
+    -m ce_base_extractor
 
 Write-Host "完成: dist\CE基址提取器.exe"

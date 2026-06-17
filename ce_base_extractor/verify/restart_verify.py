@@ -12,6 +12,8 @@ class RestartVerifyResult:
     chain: PointerChain
     before: int | float | bytes | None
     after: int | float | bytes | None
+    readable: bool
+    value_unchanged: bool | None
     stable: bool
     error: str = ""
 
@@ -22,7 +24,13 @@ def verify_restart_stability(
     preset_id: str = "ldplayer",
     pointer_size: int = 8,
     pid: int | None = None,
+    require_value_match: bool = False,
 ) -> list[RestartVerifyResult]:
+    """重启后验证指针链。
+
+    默认以「链可读 + 模块存在」为稳定（stable）；数值是否变化仅作参考。
+    require_value_match=True 时，stable 还要求 before == after。
+    """
     preset = get_preset(preset_id)
     names = list(preset.process_names) if preset else ["dnplayer.exe"]
     results: list[RestartVerifyResult] = []
@@ -35,6 +43,8 @@ def verify_restart_stability(
                 chain=c,
                 before=before_values.get(c.export_name(i + 1)),
                 after=None,
+                readable=False,
+                value_unchanged=None,
                 stable=False,
                 error=str(exc),
             )
@@ -46,13 +56,25 @@ def verify_restart_stability(
             name = chain.export_name(i + 1)
             before = before_values.get(name)
             try:
+                mem.resolve_chain(
+                    chain.module_name,
+                    chain.module_offset,
+                    chain.offsets,
+                    pointer_size,
+                )
                 after = read_chain_value(mem, chain, pointer_size)
-                stable = before is not None and before == after
+                readable = True
+                value_unchanged = before == after if before is not None else None
+                stable = readable and (
+                    value_unchanged if require_value_match and before is not None else True
+                )
                 results.append(
                     RestartVerifyResult(
                         chain=chain,
                         before=before,
                         after=after,
+                        readable=readable,
+                        value_unchanged=value_unchanged,
                         stable=stable,
                     )
                 )
@@ -62,6 +84,8 @@ def verify_restart_stability(
                         chain=chain,
                         before=before,
                         after=None,
+                        readable=False,
+                        value_unchanged=None,
                         stable=False,
                         error=str(exc),
                     )

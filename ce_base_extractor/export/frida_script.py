@@ -25,7 +25,9 @@ def chains_to_frida_script(
     proc_array = ", ".join(f'"{p}"' for p in process_names)
 
     return f"""// Frida 脚本 · {game_name} · 由 ce-base-extractor 生成
-// frida -n dnplayer.exe -l {game_name}_frida.js
+// 用法: frida -n dnplayer.exe -l {game_name}_frida.js
+// 注意: 模拟器内 Android so（libil2cpp.so）可能需 attach 到 Android 子进程；
+//       若 PC 进程找不到模块，请用 frida-ps 确认目标 PID 或使用 ADB + /proc/maps。
 
 const PROCESS_NAMES = [{proc_array}];
 const CHAINS = [

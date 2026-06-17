@@ -19,24 +19,22 @@ flowchart LR
   I --> J[python game_reader.py]
 ```
 
-## 功能一览（v0.4）
+## 功能一览（v0.4.1）
 
 | 功能 | 说明 |
 |------|------|
-| 交叉验证 | 多 SQLite 流式取交集 |
+| 交叉验证 | 多 SQLite 流式取交集 + 稳定率 |
 | 字段名/类型 | 自定义 gold/hp + int32/float 等 |
-| **智能命名** | 一键根据模块/偏移建议字段名 |
-| **实时监控** | GUI 定时刷新内存数值 |
+| **智能命名** | 模块/偏移/Il2Cpp + 常见字段词典 |
+| **实时监控** | GUI 定时刷新，数值变化高亮 |
 | **游戏配置** | 保存/加载完整基址方案 |
 | **一键导出全部** | py + scc + ct + json + frida + module |
-| **SCC 导入** | 从 JSON 反向加载到 GUI |
-| **SQLite 对比** | 两份扫描结果差异统计 |
-| **Frida 脚本** | 导出 `*_frida.js` |
-| **可 import 模块** | `*_memory.py` 供脚本引用 |
-| 雷电多开 | 进程列表对话框选 PID |
-| 重启验证 | 记录读数 → 重启 → 对比 |
-| Il2Cpp 映射 | json/cs 自动建议字段名 |
-| 打包 EXE | `build_exe.ps1` |
+| **SCC 集成** | `integrations.scc` 供 script-control-center 加载 |
+| **SQLite 对比** | 2～N 份扫描差异与稳定率 |
+| **CLI 子命令** | diff / verify / watch / import-scc |
+| **Frida 脚本** | 导出 `*_frida.js`（含模拟器说明） |
+| 重启验证 | 以指针链可读为主，数值变化仅提示 |
+| 打包 EXE | `build_exe.ps1`（支持 frozen 配置路径） |
 
 ## 快速开始
 
@@ -49,13 +47,15 @@ cd E:\xiangmu\ce-base-extractor
 ### 命令行
 
 ```powershell
-# 交叉验证 + 一键导出全部格式
+# 向后兼容：直接传 SQLite
 .\.venv\Scripts\python -m ce_base_extractor r1.sqlite --cross r2.sqlite r3.sqlite `
   --format all --game mygame -o ./mygame_export
 
-# Frida / 可 import 模块
-.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --format frida --game mygame
-.\.venv\Scripts\python -m ce_base_extractor scan.sqlite --format module --game mygame
+# 子命令
+.\.venv\Scripts\python -m ce_base_extractor diff r1.sqlite r2.sqlite r3.sqlite
+.\.venv\Scripts\python -m ce_base_extractor watch --auto-extract
+.\.venv\Scripts\python -m ce_base_extractor import-scc mygame_scc.json --format py
+.\.venv\Scripts\python -m ce_base_extractor verify --profile mygame
 ```
 
 ### Python 脚本
@@ -66,35 +66,37 @@ python mygame_reader.py --pid 12345
 python mygame_reader.py --chain gold
 ```
 
+### SCC 集成
+
+```python
+from ce_base_extractor.integrations.scc import load_bases, chain_to_reader_args
+
+cfg = load_bases("mygame_scc.json")
+for chain in cfg["chains"]:
+    print(chain_to_reader_args(chain))
+```
+
 ## 重启验证（GUI）
 
 1. 提取结果后为字段命名（双击或「编辑字段」）
 2. 点「记录读数」
 3. 重启雷电模拟器
-4. 点「重启验证」→ 稳定项自动标记 ✓ 并写入收藏
+4. 点「重启验证」→ **链可读**即标记 ✓（金币变化会提示但不判失败）
 
-## 示例
+## 故障排查
 
-见 [examples/README.md](examples/README.md)
-
-```powershell
-.\.venv\Scripts\python examples\make_sample_sqlite.py
-.\.venv\Scripts\python -m ce_base_extractor examples\sample_r1.sqlite --cross examples\sample_r2.sqlite --format py --game demo
-```
-
-## 打包 EXE
-
-```powershell
-.\build_exe.ps1
-# 输出: dist\CE基址提取器.exe
-```
+见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ## 开发
 
 ```powershell
-.\.venv\Scripts\python -m pytest tests -q
+pip install -r requirements-dev.txt
+pytest tests -q
+ruff check .
 ```
+
+Agent 指南见 [AGENTS.md](AGENTS.md)
 
 ## 许可
 
-仅供学习与研究。请遵守游戏服务条款与当地法律法规。
+MIT · 仅供学习与研究。请遵守游戏服务条款与当地法律法规。

@@ -1,26 +1,6 @@
 """script-control-center 脚本中加载 CE 基址配置的示例。"""
-from __future__ import annotations
 
-import json
-from pathlib import Path
-
-
-def load_bases(path: str | Path) -> dict:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if data.get("format", "").startswith("ce-base-extractor"):
-        return data
-    raise ValueError("非 ce-base-extractor SCC 格式")
-
-
-def chain_to_reader_args(chain: dict) -> dict:
-    return {
-        "name": chain["name"],
-        "module": chain["module"],
-        "module_offset": chain["module_offset"],
-        "offsets": chain["offsets"],
-        "type": chain.get("type", "int32"),
-    }
-
+from ce_base_extractor.integrations.scc import chain_to_reader_args, load_bases
 
 if __name__ == "__main__":
     import sys

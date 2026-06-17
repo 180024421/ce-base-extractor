@@ -1,98 +1,1 @@
-from __future__ import annotations
-
-import re
-
-from ce_base_extractor.filters.presets import get_preset
-
-EMULATOR_HOST_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(p, re.IGNORECASE)
-    for p in (
-        r"dnplayer\.exe",
-        r"ldplayer",
-        r"ldbox",
-        r"ldvbox",
-        r"nox",
-        r"mumu",
-        r"nemu",
-        r"hd-player",
-        r"bluestacks",
-        r"memu",
-        r"androidprocess",
-        r"vboxheadless",
-    )
-]
-
-ANDROID_GAME_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(p, re.IGNORECASE)
-    for p in (
-        r"libil2cpp\.so",
-        r"libunity\.so",
-        r"libmain\.so",
-        r"libue4\.so",
-        r"libgame\.so",
-        r"libnative\.so",
-        r"libcocos",
-        r"libpgl\.so",
-        r"classes\.dex",
-        r"libboot\.so",
-        r"global-metadata\.dat",
-    )
-]
-
-SYSTEM_DEPRIORITIZE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(p, re.IGNORECASE)
-    for p in (
-        r"ntdll\.dll",
-        r"kernel32\.dll",
-        r"kernelbase\.dll",
-        r"ucrtbase\.dll",
-        r"msvcrt\.dll",
-        r"user32\.dll",
-        r"gdi32\.dll",
-        r"advapi32\.dll",
-        r"libc\.so",
-        r"libdl\.so",
-        r"libm\.so",
-        r"linker",
-        r"libart\.so",
-        r"libandroid_runtime\.so",
-    )
-]
-
-RANDOM_MODULE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(p, re.IGNORECASE)
-    for p in (
-        r"^[0-9a-f]{8,}\.dll$",
-        r"^tmp",
-        r"^temp",
-        r"\.tmp$",
-        r"^\d+\.so$",
-    )
-]
-
-
-def _matches(patterns: list[re.Pattern[str]], name: str) -> bool:
-    return any(p.search(name) for p in patterns)
-
-
-def module_tier(module_name: str, emulator_mode: bool, preset_id: str = "ldplayer") -> int:
-    if _matches(RANDOM_MODULE_PATTERNS, module_name):
-        return -1
-    if _matches(SYSTEM_DEPRIORITIZE_PATTERNS, module_name):
-        return 0
-
-    preset = get_preset(preset_id) if emulator_mode else None
-    if preset:
-        lower = module_name.lower()
-        for pref in preset.preferred_modules:
-            if pref.lower() in lower:
-                return 3
-        for host_pat in preset.host_module_patterns:
-            if host_pat.lower() in lower:
-                return 2
-
-    if emulator_mode and _matches(ANDROID_GAME_PATTERNS, module_name):
-        return 3
-    if emulator_mode and _matches(EMULATOR_HOST_PATTERNS, module_name):
-        return 2
-    return 1
+from __future__ import annotationsimport refrom ce_base_extractor.filters.presets import get_presetEMULATOR_HOST_PATTERNS: list[re.Pattern[str]] = [    re.compile(p, re.IGNORECASE)    for p in (        r"dnplayer\.exe",        r"ldplayer",        r"ldbox",        r"ldvbox",        r"nox",        r"mumu",        r"nemu",        r"hd-player",        r"bluestacks",        r"memu",        r"androidprocess",        r"vboxheadless",    )]ANDROID_GAME_PATTERNS: list[re.Pattern[str]] = [    re.compile(p, re.IGNORECASE)    for p in (        r"libil2cpp\.so",        r"libunity\.so",        r"libmain\.so",        r"libue4\.so",        r"libgame\.so",        r"libnative\.so",        r"libcocos",        r"libpgl\.so",        r"classes\.dex",        r"libboot\.so",        r"global-metadata\.dat",    )]SYSTEM_DEPRIORITIZE_PATTERNS: list[re.Pattern[str]] = [    re.compile(p, re.IGNORECASE)    for p in (        r"ntdll\.dll",        r"kernel32\.dll",        r"kernelbase\.dll",        r"ucrtbase\.dll",        r"msvcrt\.dll",        r"user32\.dll",        r"gdi32\.dll",        r"advapi32\.dll",        r"libc\.so",        r"libdl\.so",        r"libm\.so",        r"linker",        r"libart\.so",        r"libandroid_runtime\.so",    )]RANDOM_MODULE_PATTERNS: list[re.Pattern[str]] = [    re.compile(p, re.IGNORECASE)    for p in (        r"^[0-9a-f]{8,}\.dll$",        r"^tmp",        r"^temp",        r"\.tmp$",        r"^\d+\.so$",    )]def _matches(patterns: list[re.Pattern[str]], name: str) -> bool:    return any(p.search(name) for p in patterns)def module_tier(module_name: str, emulator_mode: bool, preset_id: str = "ldplayer") -> int:    if _matches(RANDOM_MODULE_PATTERNS, module_name):        return -1    if _matches(SYSTEM_DEPRIORITIZE_PATTERNS, module_name):        return 0    preset = get_preset(preset_id) if emulator_mode else None    if preset:        lower = module_name.lower()        for pref in preset.preferred_modules:            if pref.lower() in lower:                return 3        for host_pat in preset.host_module_patterns:            if host_pat.lower() in lower:                return 2    if emulator_mode and _matches(ANDROID_GAME_PATTERNS, module_name):        return 3    if emulator_mode and _matches(EMULATOR_HOST_PATTERNS, module_name):        return 2    return 1

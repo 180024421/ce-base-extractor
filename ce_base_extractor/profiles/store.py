@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
+from ce_base_extractor.models import ExtractResult, PointerChain
 
 
 def _profiles_dir() -> Path:

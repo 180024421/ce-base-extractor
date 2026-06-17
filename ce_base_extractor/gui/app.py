@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import threading
 import tkinter as tk
-from dataclasses import asdict
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from ce_base_extractor.compare.sqlite_diff import diff_sqlite_files
+from ce_base_extractor.compare.sqlite_diff import diff_sqlite_files, diff_sqlite_many
 from ce_base_extractor.export.batch_export import export_all
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import format_ce_table, to_json, to_text
-from ce_base_extractor.export.frida_script import save_frida_script
 from ce_base_extractor.export.python_script import save_python_script
 from ce_base_extractor.export.scc_export import save_scc_json
 from ce_base_extractor.filters.presets import PRESETS, get_preset
@@ -18,12 +17,12 @@ from ce_base_extractor.gui.process_picker import pick_process
 from ce_base_extractor.gui.wizard import show_first_run_wizard
 from ce_base_extractor.history.store import HistoryStore
 from ce_base_extractor.io.scc_import import import_scc_to_result
-from ce_base_extractor.profiles.store import GameProfile, ProfileStore
-from ce_base_extractor.suggest.field_names import suggest_field_names
 from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
 from ce_base_extractor.parsers.sqlite_parser import list_ptrids
 from ce_base_extractor.pipeline import extract, load_config, save_config, wizard_completed
+from ce_base_extractor.profiles.store import GameProfile, ProfileStore
 from ce_base_extractor.runtime.win_memory import ProcessMemory, read_chain_value
+from ce_base_extractor.suggest.field_names import suggest_field_names
 from ce_base_extractor.verify.restart_verify import verify_restart_stability
 from ce_base_extractor.watch.folder_watcher import FolderWatcher
 
@@ -57,6 +56,8 @@ class App(tk.Tk):
         self._profiles = ProfileStore()
         self._monitor_running = False
         self._monitor_job: str | None = None
+        self._monitor_prev: dict[str, object] = {}
+        self._extract_busy = False
 
         self._build_ui()
         if _HAS_WINDND:
@@ -153,11 +154,15 @@ class App(tk.Tk):
         ttk.Spinbox(opts, from_=1, to=200, textvariable=self.top_n_var, width=8).grid(
             row=1, column=1, padx=4, pady=(6, 0)
         )
-        ttk.Label(opts, text="最大层级").grid(row=1, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0))
+        ttk.Label(opts, text="最大层级").grid(
+            row=1, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0)
+        )
         ttk.Spinbox(opts, from_=1, to=10, textvariable=self.max_depth_var, width=8).grid(
             row=1, column=3, padx=4, pady=(6, 0)
         )
-        ttk.Label(opts, text="末级偏移(hex)").grid(row=1, column=4, sticky=tk.W, padx=(12, 0), pady=(6, 0))
+        ttk.Label(opts, text="末级偏移(hex)").grid(
+            row=1, column=4, sticky=tk.W, padx=(12, 0), pady=(6, 0)
+        )
         ttk.Entry(opts, textvariable=self.end_offset_var, width=10).grid(
             row=1, column=5, padx=4, pady=(6, 0)
         )
@@ -168,10 +173,18 @@ class App(tk.Tk):
         ttk.Combobox(
             opts, textvariable=self.pointer_size_var, values=("4", "8"), width=6, state="readonly"
         ).grid(row=2, column=1, padx=4, pady=(6, 0), sticky=tk.W)
-        ttk.Label(opts, text="Il2Cpp 映射").grid(row=2, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0))
-        ttk.Entry(opts, textvariable=self.il2cpp_var, width=36).grid(row=2, column=3, columnspan=2, padx=4, pady=(6, 0))
-        ttk.Button(opts, text="浏览", command=self._browse_il2cpp).grid(row=2, column=5, pady=(6, 0))
-        ttk.Label(opts, textvariable=self.pid_label_var).grid(row=2, column=6, padx=(12, 0), pady=(6, 0), sticky=tk.W)
+        ttk.Label(opts, text="Il2Cpp 映射").grid(
+            row=2, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0)
+        )
+        ttk.Entry(opts, textvariable=self.il2cpp_var, width=36).grid(
+            row=2, column=3, columnspan=2, padx=4, pady=(6, 0)
+        )
+        ttk.Button(opts, text="浏览", command=self._browse_il2cpp).grid(
+            row=2, column=5, pady=(6, 0)
+        )
+        ttk.Label(opts, textvariable=self.pid_label_var).grid(
+            row=2, column=6, padx=(12, 0), pady=(6, 0), sticky=tk.W
+        )
 
         paned = ttk.Panedwindow(self._tab_extract, orient=tk.VERTICAL)
         paned.pack(fill=tk.BOTH, expand=True, pady=6)
@@ -202,7 +215,9 @@ class App(tk.Tk):
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.bind("<Double-1>", self._on_tree_double_click)
-        ttk.Button(list_frame, text="编辑字段", command=self._edit_selected_chain).pack(side=tk.BOTTOM, pady=4)
+        ttk.Button(list_frame, text="编辑字段", command=self._edit_selected_chain).pack(
+            side=tk.BOTTOM, pady=4
+        )
 
         self.detail = tk.Text(detail_frame, wrap=tk.WORD, font=("Consolas", 10))
         self.detail.pack(fill=tk.BOTH, expand=True)
@@ -217,7 +232,12 @@ class App(tk.Tk):
         ttk.Button(btns, text="添加文件", command=self._add_cross_file).pack(side=tk.LEFT)
         ttk.Button(btns, text="清空", command=self._clear_cross_files).pack(side=tk.LEFT, padx=6)
         ttk.Button(btns, text="交叉验证提取", command=self._run_cross_extract).pack(side=tk.LEFT)
-        ttk.Button(btns, text="对比两份SQLite", command=self._diff_sqlite).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btns, text="对比 SQLite", command=self._diff_sqlite).pack(side=tk.LEFT, padx=6)
+
+        self.cross_stability_var = tk.StringVar(value="稳定率: —")
+        ttk.Label(
+            self._tab_cross, textvariable=self.cross_stability_var, foreground="#0066cc"
+        ).pack(anchor=tk.W, pady=(0, 4))
 
         self.cross_list = tk.Listbox(self._tab_cross, height=8)
         self.cross_list.pack(fill=tk.BOTH, expand=True, pady=4)
@@ -236,7 +256,9 @@ class App(tk.Tk):
         self.module_canvas.configure(yscrollcommand=mscroll.set)
         mscroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.module_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._module_window = self.module_canvas.create_window((0, 0), window=self.module_inner, anchor=tk.NW)
+        self._module_window = self.module_canvas.create_window(
+            (0, 0), window=self.module_inner, anchor=tk.NW
+        )
         self.module_inner.bind("<Configure>", self._on_module_frame_configure)
         self.module_canvas.bind("<Configure>", self._on_module_canvas_configure)
 
@@ -283,6 +305,8 @@ class App(tk.Tk):
         ):
             self.monitor_tree.heading(col, text=title)
             self.monitor_tree.column(col, width=w, anchor=tk.W)
+        self.monitor_tree.tag_configure("changed", foreground="#c0392b")
+        self.monitor_tree.tag_configure("same", foreground="#27ae60")
         self.monitor_tree.pack(fill=tk.BOTH, expand=True, pady=8)
 
     def _build_profile_tab(self) -> None:
@@ -308,7 +332,9 @@ class App(tk.Tk):
         row.pack(fill=tk.X)
         ttk.Button(row, text="保存当前结果到收藏", command=self._save_favorites).pack(side=tk.LEFT)
         ttk.Button(row, text="刷新", command=self._refresh_history).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="导出收藏为 Python", command=self._export_history_python).pack(side=tk.LEFT)
+        ttk.Button(row, text="导出收藏为 Python", command=self._export_history_python).pack(
+            side=tk.LEFT
+        )
 
         self.history_game_var = tk.StringVar()
         ttk.Label(self._tab_history, text="游戏").pack(anchor=tk.W, pady=(8, 0))
@@ -326,9 +352,15 @@ class App(tk.Tk):
         footer = ttk.Frame(self, padding=(12, 6))
         footer.pack(fill=tk.X)
         ttk.Button(footer, text="复制全部", command=self._copy_all).pack(side=tk.LEFT)
-        ttk.Button(footer, text="导出 TXT", command=lambda: self._export("txt")).pack(side=tk.LEFT, padx=4)
-        ttk.Button(footer, text="导出 JSON", command=lambda: self._export("json")).pack(side=tk.LEFT)
-        ttk.Button(footer, text="保存配置", command=self._save_user_config).pack(side=tk.LEFT, padx=12)
+        ttk.Button(footer, text="导出 TXT", command=lambda: self._export("txt")).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(footer, text="导出 JSON", command=lambda: self._export("json")).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(footer, text="保存配置", command=self._save_user_config).pack(
+            side=tk.LEFT, padx=12
+        )
 
         self.watch_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -447,18 +479,60 @@ class App(tk.Tk):
 
         msg = f"原始 {result.total_raw} 条 → 输出 {len(result.chains)} 条"
         if result.cross_validate_meta:
-            msg += f"（交叉验证 {result.cross_validate_meta.get('stable_keys', '?')} 条稳定）"
+            meta = result.cross_validate_meta
+            ratio = meta.get("stability_ratio")
+            if ratio is not None:
+                msg += f"（稳定率 {float(ratio) * 100:.1f}%）"
+            else:
+                msg += f"（交叉验证 {meta.get('stable_keys', '?')} 条稳定）"
+            self.cross_stability_var.set(
+                f"稳定率: {float(meta.get('stability_ratio', 0)) * 100:.1f}%"
+                if meta.get("stability_ratio") is not None
+                else f"交集: {meta.get('stable_keys', '?')} 条"
+            )
         self.status_var.set(msg)
 
     def _run_extract(self) -> None:
         if not self._current_file:
             messagebox.showwarning("提示", "请先选择文件")
             return
-        try:
-            result = extract(self._current_file, config=self._current_config())
-            self._populate_result(result)
-        except Exception as exc:
-            messagebox.showerror("提取失败", str(exc))
+        if self._extract_busy:
+            return
+        self._extract_async(
+            lambda: extract(self._current_file, config=self._current_config()),
+            "正在提取基址…",
+        )
+
+    def _extract_async(self, fn, title: str) -> None:
+        self._extract_busy = True
+        self.status_var.set(title)
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.geometry("320x80")
+        win.transient(self)
+        ttk.Label(win, text=title).pack(pady=(12, 4))
+        bar = ttk.Progressbar(win, mode="indeterminate")
+        bar.pack(fill=tk.X, padx=16, pady=4)
+        bar.start(10)
+
+        def work() -> None:
+            try:
+                result = fn()
+                self.after(0, lambda: self._on_extract_done(result, win))
+            except Exception as exc:
+                self.after(0, lambda e=exc: self._on_extract_error(e, win))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_extract_done(self, result: ExtractResult, win: tk.Toplevel) -> None:
+        win.destroy()
+        self._extract_busy = False
+        self._populate_result(result)
+
+    def _on_extract_error(self, exc: Exception, win: tk.Toplevel) -> None:
+        win.destroy()
+        self._extract_busy = False
+        messagebox.showerror("提取失败", str(exc))
 
     def _add_cross_file(self) -> None:
         paths = filedialog.askopenfilenames(filetypes=[("CE SQLite", "*.sqlite *.db")])
@@ -477,14 +551,45 @@ class App(tk.Tk):
         if len(self._extra_files) < 2:
             messagebox.showwarning("提示", "交叉验证至少需要 2 个 SQLite 文件")
             return
-        try:
-            primary = self._extra_files[0]
-            extras = self._extra_files[1:]
-            result = extract(primary, config=self._current_config(), extra_files=extras)
+
+        primary = self._extra_files[0]
+        extras = self._extra_files[1:]
+
+        def fn():
+            return extract(primary, config=self._current_config(), extra_files=extras)
+
+        def done(result: ExtractResult) -> None:
             self._populate_result(result)
             self.notebook.select(self._tab_extract)
-        except Exception as exc:
-            messagebox.showerror("交叉验证失败", str(exc))
+
+        self._extract_busy = True
+        self.status_var.set("正在交叉验证…")
+        win = tk.Toplevel(self)
+        win.title("交叉验证")
+        win.geometry("320x80")
+        win.transient(self)
+        ttk.Label(win, text="正在交叉验证，大文件可能较慢…").pack(pady=(12, 4))
+        bar = ttk.Progressbar(win, mode="indeterminate")
+        bar.pack(fill=tk.X, padx=16, pady=4)
+        bar.start(10)
+
+        def work() -> None:
+            try:
+                result = fn()
+                self.after(
+                    0, lambda: (win.destroy(), setattr(self, "_extract_busy", False), done(result))
+                )
+            except Exception as exc:
+                self.after(
+                    0,
+                    lambda e=exc: (
+                        win.destroy(),
+                        setattr(self, "_extract_busy", False),
+                        messagebox.showerror("交叉验证失败", str(e)),
+                    ),
+                )
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _refresh_module_panel(self, result: ExtractResult) -> None:
         for child in self.module_inner.winfo_children():
@@ -594,7 +699,9 @@ class App(tk.Tk):
                         )
                     except Exception:
                         pass
-            messagebox.showinfo("记录读数", f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」")
+            messagebox.showinfo(
+                "记录读数", f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」"
+            )
         except Exception as exc:
             messagebox.showerror("失败", str(exc))
 
@@ -613,8 +720,16 @@ class App(tk.Tk):
         verified_names: list[str] = []
         chains = list(self._result.chains)
         for i, r in enumerate(results):
-            status = "稳定 ✓" if r.stable else ("失败: " + r.error if r.error else f"变化 {r.before} → {r.after}")
             name = chains[i].export_name(i + 1)
+            if r.error:
+                status = f"失败: {r.error}"
+            elif r.stable:
+                if r.value_unchanged is False:
+                    status = f"可读 ✓（数值变化 {r.before} → {r.after}）"
+                else:
+                    status = "稳定 ✓"
+            else:
+                status = "不稳定"
             lines.append(f"{name}: {status}")
             if r.stable:
                 verified_names.append(name)
@@ -666,7 +781,9 @@ class App(tk.Tk):
             messagebox.showwarning("提示", "请先提取结果")
             return
         ext = fmt
-        path = filedialog.asksaveasfilename(defaultextension=f".{ext}", filetypes=[(ext, f"*.{ext}")])
+        path = filedialog.asksaveasfilename(
+            defaultextension=f".{ext}", filetypes=[(ext, f"*.{ext}")]
+        )
         if not path:
             return
         content = to_json(self._result) if fmt == "json" else to_text(self._result)
@@ -677,7 +794,9 @@ class App(tk.Tk):
         if not self._result:
             messagebox.showwarning("提示", "请先提取结果")
             return
-        path = filedialog.asksaveasfilename(defaultextension=".CT", filetypes=[("CE Table", "*.CT")])
+        path = filedialog.asksaveasfilename(
+            defaultextension=".CT", filetypes=[("CE Table", "*.CT")]
+        )
         if not path:
             return
         Path(path).write_text(
@@ -713,8 +832,8 @@ class App(tk.Tk):
             messagebox.showwarning("提示", "请先提取结果")
             return
         try:
-            from ce_base_extractor.runtime.win_memory import ProcessMemory
             from ce_base_extractor.filters.presets import get_preset
+            from ce_base_extractor.runtime.win_memory import ProcessMemory
 
             preset = get_preset(self.preset_var.get())
             names = list(preset.process_names) if preset else ["dnplayer.exe"]
@@ -725,9 +844,7 @@ class App(tk.Tk):
                 for i, chain in enumerate(self._result.chains[:5], 1):
                     try:
                         val = read_chain_value(mem, chain, ps)
-                        lines.append(
-                            f"{chain.export_name(i)} ({chain.value_type}) = {val}"
-                        )
+                        lines.append(f"{chain.export_name(i)} ({chain.value_type}) = {val}")
                     except Exception as exc:
                         lines.append(f"{chain.module_name}: 失败 - {exc}")
             messagebox.showinfo("读取测试（前5条）", "\n".join(lines) or "无结果")
@@ -842,21 +959,37 @@ class App(tk.Tk):
             messagebox.showerror("导入失败", str(exc))
 
     def _diff_sqlite(self) -> None:
-        if len(self._extra_files) < 2:
-            a = filedialog.askopenfilename(title="SQLite A", filetypes=[("SQLite", "*.sqlite *.db")])
-            b = filedialog.askopenfilename(title="SQLite B", filetypes=[("SQLite", "*.sqlite *.db")])
-            if not a or not b:
-                return
-            fa, fb = Path(a), Path(b)
-        else:
-            fa, fb = self._extra_files[0], self._extra_files[1]
+        ptrid = self._parse_ptrid()
         try:
-            diff = diff_sqlite_files(fa, fb, ptrid=self._parse_ptrid())
-            msg = (
-                f"A: {diff['count_a']} 条\nB: {diff['count_b']} 条\n"
-                f"共同: {diff['common']} 条\n仅A: {diff['only_a']} 仅B: {diff['only_b']}\n"
-                f"稳定率: {diff['stability_ratio']*100:.1f}%"
-            )
+            if len(self._extra_files) >= 2:
+                files = self._extra_files
+            else:
+                picked = filedialog.askopenfilenames(
+                    title="选择 SQLite（可多选）",
+                    filetypes=[("SQLite", "*.sqlite *.db")],
+                )
+                if len(picked) < 2:
+                    return
+                files = [Path(p) for p in picked]
+
+            if len(files) == 2:
+                diff = diff_sqlite_files(files[0], files[1], ptrid=ptrid)
+                msg = (
+                    f"A: {diff['count_a']} 条\nB: {diff['count_b']} 条\n"
+                    f"共同: {diff['common']} 条\n仅A: {diff['only_a']} 仅B: {diff['only_b']}\n"
+                    f"稳定率: {diff['stability_ratio'] * 100:.1f}%"
+                )
+            else:
+                diff = diff_sqlite_many(files, ptrid=ptrid)
+                msg = (
+                    f"文件数: {diff['file_count']}\n"
+                    f"各文件: {diff['counts_per_file']}\n"
+                    f"并集: {diff['union']} 条\n"
+                    f"全部出现: {diff['in_all']} 条\n"
+                    f"稳定率: {diff['stability_ratio'] * 100:.1f}%\n"
+                    f"出现次数分布: {diff['occurrence_histogram']}"
+                )
+                self.cross_stability_var.set(f"稳定率: {diff['stability_ratio'] * 100:.1f}%")
             messagebox.showinfo("SQLite 对比", msg)
         except Exception as exc:
             messagebox.showerror("对比失败", str(exc))
@@ -900,8 +1033,13 @@ class App(tk.Tk):
                     name = chain.export_name(i)
                     try:
                         val = read_chain_value(mem, chain, ps)
+                        prev = self._monitor_prev.get(name)
+                        tag = "same" if prev == val else "changed"
+                        if prev is None:
+                            tag = ""
+                        self._monitor_prev[name] = val
                         self.monitor_tree.insert(
-                            "", tk.END, values=(name, val, chain.value_type, now)
+                            "", tk.END, values=(name, val, chain.value_type, now), tags=(tag,)
                         )
                     except Exception as exc:
                         self.monitor_tree.insert(

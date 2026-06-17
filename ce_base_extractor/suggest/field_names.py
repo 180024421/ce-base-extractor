@@ -13,6 +13,25 @@ _KNOWN_END_OFFSETS: dict[int, str] = {
     0x30: "data",
 }
 
+_FIELD_HINTS: dict[str, str] = {
+    "gold": "gold",
+    "coin": "gold",
+    "money": "gold",
+    "diamond": "diamond",
+    "gem": "diamond",
+    "crystal": "diamond",
+    "hp": "hp",
+    "health": "hp",
+    "mp": "mp",
+    "mana": "mp",
+    "exp": "exp",
+    "experience": "exp",
+    "level": "level",
+    "lv": "level",
+    "stamina": "stamina",
+    "energy": "stamina",
+}
+
 
 def suggest_field_names(chains: list[PointerChain]) -> list[PointerChain]:
     used: set[str] = set()
@@ -47,6 +66,10 @@ def suggest_field_names(chains: list[PointerChain]) -> list[PointerChain]:
 
 def _guess_name(chain: PointerChain, index: int) -> str:
     if chain.il2cpp_symbol:
+        sym = chain.il2cpp_symbol.lower()
+        for key, field in _FIELD_HINTS.items():
+            if key in sym:
+                return field
         safe = re.sub(r"[^\w.]", "_", chain.il2cpp_symbol)
         return safe.replace(".", "_").lower()
 
@@ -56,7 +79,7 @@ def _guess_name(chain: PointerChain, index: int) -> str:
     elif "unity" in mod:
         base = "unity"
     else:
-        base = re.sub(r"[^\w]", "_", Path_stem(mod))
+        base = re.sub(r"[^\w]", "_", _path_stem(mod))
 
     if chain.offsets:
         last = chain.offsets[-1]
@@ -66,6 +89,12 @@ def _guess_name(chain: PointerChain, index: int) -> str:
 
 
 def _guess_type(chain: PointerChain) -> str:
+    if chain.il2cpp_symbol:
+        sym = chain.il2cpp_symbol.lower()
+        if any(k in sym for k in ("float", "single")):
+            return "float"
+        if "double" in sym:
+            return "double"
     if not chain.offsets:
         return "int32"
     last = chain.offsets[-1]
@@ -74,7 +103,7 @@ def _guess_type(chain: PointerChain) -> str:
     return "int32"
 
 
-def Path_stem(name: str) -> str:
+def _path_stem(name: str) -> str:
     if "." in name:
         return name.rsplit(".", 1)[0]
     return name

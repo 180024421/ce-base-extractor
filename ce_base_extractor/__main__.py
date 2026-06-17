@@ -4,23 +4,20 @@ import argparse
 import sys
 from pathlib import Path
 
-from ce_base_extractor.export.batch_export import export_all
-from ce_base_extractor.export.ct_export import result_to_ct
-from ce_base_extractor.export.formatter import save_result
-from ce_base_extractor.export.frida_script import save_frida_script
-from ce_base_extractor.export.python_module import save_python_module
-from ce_base_extractor.export.python_script import save_python_script
-from ce_base_extractor.export.scc_export import save_scc_json
+from ce_base_extractor.cli_commands import (
+    run_diff,
+    run_extract,
+    run_import_scc,
+    run_verify,
+    run_watch,
+)
 from ce_base_extractor.gui.app import run_gui
-from ce_base_extractor.pipeline import extract, load_config
+
+WATCH_DEFAULT = str(Path.home() / "Documents" / "ce-exports")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="ce-base-extractor",
-        description="CE 指针扫描 → 稳定基址 → Python 读取脚本（雷电优化）",
-    )
-    p.add_argument("input", nargs="?", help="CE 导出的 .sqlite / .db / .PTR")
+def _add_extract_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("input", help="CE 导出的 .sqlite / .db / .PTR")
     p.add_argument("-o", "--output", help="输出路径或目录（all 格式时为目录）")
     p.add_argument(
         "--format",
@@ -40,80 +37,89 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pid", type=int)
     p.add_argument("--il2cpp-map")
     p.add_argument("--no-emulator", action="store_true")
-    p.add_argument("--gui", action="store_true")
     p.add_argument("--config")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="ce-base-extractor",
+        description="CE 指针扫描 → 稳定基址 → Python 读取脚本（雷电优化）",
+    )
+    sub = p.add_subparsers(dest="command")
+
+    extract_p = sub.add_parser("extract", help="从 SQLite/PTR 提取基址")
+    _add_extract_args(extract_p)
+
+    diff_p = sub.add_parser("diff", help="对比 2～N 份 SQLite 扫描结果")
+    diff_p.add_argument("files", nargs="+", help="SQLite 文件路径")
+    diff_p.add_argument("--ptrid", type=int)
+
+    verify_p = sub.add_parser("verify", help="重启后验证已保存的游戏配置")
+    verify_p.add_argument("--profile", required=True, help="游戏配置名")
+    verify_p.add_argument("--pid", type=int)
+    verify_p.add_argument(
+        "--require-value-match",
+        action="store_true",
+        help="除可读外还要求数值与上次记录一致",
+    )
+
+    watch_p = sub.add_parser("watch", help="监视 CE 导出目录")
+    watch_p.add_argument("folder", nargs="?", default=WATCH_DEFAULT)
+    watch_p.add_argument("--interval", type=float, default=2.0)
+    watch_p.add_argument("--auto-extract", action="store_true")
+    watch_p.add_argument("--game", default="game")
+    watch_p.add_argument("--config")
+
+    imp_p = sub.add_parser("import-scc", help="从 SCC JSON 导入并导出")
+    imp_p.add_argument("input", help="SCC JSON 路径")
+    imp_p.add_argument("-o", "--output")
+    imp_p.add_argument(
+        "--format",
+        choices=("txt", "json", "py", "all"),
+        default="py",
+    )
+    imp_p.add_argument("--preset", default="ldplayer")
+    imp_p.add_argument("--game", default="game")
+
+    return p
+
+
+def _build_legacy_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="ce-base-extractor")
+    p.add_argument("input", nargs="?")
+    p.add_argument("--gui", action="store_true")
+    _add_extract_args(p)
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.gui or not args.input:
+    argv = list(argv if argv is not None else sys.argv[1:])
+    if getattr(sys, "frozen", False) and not argv:
+        run_gui()
+        return 0
+    if not argv or argv == ["--gui"] or (len(argv) == 1 and argv[0] == "--gui"):
         run_gui()
         return 0
 
-    cfg = load_config(args.config)
-    if args.top is not None:
-        cfg.top_n = args.top
-    if args.max_depth is not None:
-        cfg.max_depth = args.max_depth
-    if args.max_offset is not None:
-        cfg.max_single_offset = args.max_offset
-    if args.ptrid is not None:
-        cfg.ptrid = args.ptrid
-    if args.no_emulator:
-        cfg.emulator_mode = False
-    cfg.preset = args.preset
-    cfg.game_name = args.game
-    if args.whitelist:
-        cfg.module_whitelist = args.whitelist
-    if args.end_offset is not None:
-        cfg.required_end_offset = args.end_offset
-    if args.pointer_size is not None:
-        cfg.pointer_size = args.pointer_size
-    if args.pid is not None:
-        cfg.target_pid = args.pid
-    if args.il2cpp_map:
-        cfg.il2cpp_map_path = args.il2cpp_map
+    subcommands = {"extract", "diff", "verify", "watch", "import-scc"}
+    if argv[0] in subcommands:
+        args = build_parser().parse_args(argv)
+        if args.command == "extract":
+            return run_extract(args)
+        if args.command == "diff":
+            return run_diff(args)
+        if args.command == "verify":
+            return run_verify(args)
+        if args.command == "watch":
+            return run_watch(args)
+        return run_import_scc(args)
 
-    input_path = Path(args.input)
-    result = extract(input_path, config=cfg, extra_files=args.cross)
-
-    if args.format == "all":
-        out_dir = args.output or str(input_path.parent / f"{cfg.game_name}_export")
-        files = export_all(
-            result, out_dir, game_name=cfg.game_name, preset_id=cfg.preset,
-            pointer_size=cfg.pointer_size, target_pid=cfg.target_pid,
-        )
-        print(f"完成: 导出 {len(files)} 个文件 → {out_dir}")
+    legacy = _build_legacy_parser()
+    args = legacy.parse_args(argv)
+    if args.gui or not args.input:
+        run_gui()
         return 0
-
-    if args.format == "py":
-        out = args.output or str(input_path.with_name(f"{cfg.game_name}_reader.py"))
-        save_python_script(
-            result, out, preset_id=cfg.preset, game_name=cfg.game_name,
-            pointer_size=cfg.pointer_size, target_pid=cfg.target_pid,
-        )
-    elif args.format == "ct":
-        out = args.output or str(input_path.with_suffix(".CT"))
-        Path(out).write_text(result_to_ct(result, title=cfg.game_name), encoding="utf-8")
-    elif args.format == "scc":
-        out = args.output or str(input_path.with_name(f"{cfg.game_name}_scc.json"))
-        save_scc_json(result, out, preset_id=cfg.preset)
-    elif args.format == "frida":
-        out = args.output or str(input_path.with_name(f"{cfg.game_name}_frida.js"))
-        save_frida_script(result, out, game_name=cfg.game_name, preset_id=cfg.preset)
-    elif args.format == "module":
-        out = args.output or str(input_path.with_name(f"{cfg.game_name}_memory.py"))
-        save_python_module(
-            result, out, game_name=cfg.game_name,
-            pointer_size=cfg.pointer_size, target_pid=cfg.target_pid,
-        )
-    else:
-        out = args.output or str(input_path.with_suffix(f".bases.{args.format}"))
-        save_result(result, out, fmt=args.format)
-
-    print(f"完成: 原始 {result.total_raw} 条 → 输出 {len(result.chains)} 条 → {out}")
-    return 0
+    return run_extract(args)
 
 
 if __name__ == "__main__":

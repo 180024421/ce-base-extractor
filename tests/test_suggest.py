@@ -9,4 +9,4 @@ def test_suggest_names():
     ]
     out = suggest_field_names(chains)
     assert out[0].field_name.startswith("il2cpp")
-    assert out[1].field_name == "player_hp"
+    assert out[1].field_name == "hp"

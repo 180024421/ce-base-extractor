@@ -13,9 +13,7 @@ def sample_sqlite(tmp_path: Path) -> Path:
     conn.execute(
         "CREATE TABLE pointerfiles (ptrid INTEGER PRIMARY KEY, name TEXT, maxlevel INTEGER)"
     )
-    conn.execute(
-        "INSERT INTO pointerfiles VALUES (1, 'test-scan', 4)"
-    )
+    conn.execute("INSERT INTO pointerfiles VALUES (1, 'test-scan', 4)")
     conn.execute(
         "CREATE TABLE modules (ptrid INTEGER, moduleid INTEGER, name TEXT, "
         "PRIMARY KEY (ptrid, moduleid))"
@@ -50,3 +48,40 @@ def sample_sqlite(tmp_path: Path) -> Path:
     conn.commit()
     conn.close()
     return db
+
+
+@pytest.fixture
+def sample_sqlite_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """两份有交集的 SQLite，用于 diff 测试。"""
+
+    def _make(name: str, extra_offset: int = 0) -> Path:
+        db = tmp_path / name
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "CREATE TABLE pointerfiles (ptrid INTEGER PRIMARY KEY, name TEXT, maxlevel INTEGER)"
+        )
+        conn.execute("INSERT INTO pointerfiles VALUES (1, 'scan', 4)")
+        conn.execute(
+            "CREATE TABLE modules (ptrid INTEGER, moduleid INTEGER, name TEXT, "
+            "PRIMARY KEY (ptrid, moduleid))"
+        )
+        conn.execute("INSERT INTO modules VALUES (1, 0, 'libil2cpp.so')")
+        conn.execute(
+            "CREATE TABLE results (ptrid INTEGER, resultid INTEGER, offsetcount INTEGER, "
+            "moduleid INTEGER, moduleoffset BIGINT, offset1 INTEGER, offset2 INTEGER, "
+            "PRIMARY KEY (ptrid, resultid))"
+        )
+        conn.execute(
+            "INSERT INTO results VALUES (1, 1, 2, 0, ?, 0x18, 0x20)",
+            (0x1000,),
+        )
+        if extra_offset:
+            conn.execute(
+                "INSERT INTO results VALUES (1, 2, 2, 0, ?, 0x30, 0x40)",
+                (extra_offset,),
+            )
+        conn.commit()
+        conn.close()
+        return db
+
+    return _make("r1.sqlite"), _make("r2.sqlite", extra_offset=0x2000)
