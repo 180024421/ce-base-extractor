@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 (2026-07-03)
+
+### 准确率
+- 在线探针：Top N 链自动 attach 验证可读性，可读加分、失败降权
+- 交叉验证加权：3/3 优先于 2/3，支持 `cross_validate_require_all`
+- 模糊去重：末 offset 容差合并结构相似链
+- 打分增强：8 字节对齐、深度 3–5、模拟器宿主模块减分
+- SQLite 按 preset 优选模块 `moduleid` 预过滤
+
+### 工作流 / 生态
+- CE SOP 首次向导步骤补全
+- Lua 导出（Auto Script Studio 读链模板）
+- SCC 定时复检 CLI：`scc-recheck`
+- Profile 版本化与 `profile-migrate` 对比迁移
+- watch 增量交叉验证 `--incremental-cross`
+
+### 深度能力
+- Il2CppDumper `script.json` 末 offset 反查字段
+- Frida guest / ADB maps 读取骨架
+- 一键导出含 Lua + Frida guest
+
 ## 0.4.1 (2025-06-17)
 
 ### 改进

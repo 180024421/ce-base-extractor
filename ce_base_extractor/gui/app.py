@@ -10,6 +10,7 @@ from ce_base_extractor.export.batch_export import export_all
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import format_ce_table, to_json, to_text
 from ce_base_extractor.export.python_script import save_python_script
+from ce_base_extractor.export.lua_script import save_lua_script
 from ce_base_extractor.export.scc_export import save_scc_json
 from ce_base_extractor.filters.presets import PRESETS, get_preset
 from ce_base_extractor.gui.chain_dialog import open_chain_editor
@@ -109,6 +110,7 @@ class App(tk.Tk):
         ttk.Button(row, text="选择 SQLite/PTR", command=self._browse).pack(side=tk.LEFT)
         ttk.Button(row, text="提取基址", command=self._run_extract).pack(side=tk.LEFT, padx=6)
         ttk.Button(row, text="导出 Python", command=self._export_python).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row, text="导出 Lua", command=self._export_lua).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="导出 SCC JSON", command=self._export_scc).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="导出 .CT", command=self._export_ct).pack(side=tk.LEFT, padx=4)
         ttk.Button(row, text="选进程", command=self._pick_process).pack(side=tk.LEFT, padx=4)
@@ -769,6 +771,17 @@ class App(tk.Tk):
         if path:
             save_scc_json(self._result, path, preset_id=self.preset_var.get())
             self.status_var.set(f"已导出 SCC: {path}")
+
+    def _export_lua(self) -> None:
+        if not self._result:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".lua",
+            initialfile=f"{self.game_name_var.get()}_reader.lua",
+        )
+        if path:
+            save_lua_script(self._result, path)
+            self.status_var.set(f"已导出 Lua: {path}")
 
     def _copy_all(self) -> None:
         if not self._result_text:

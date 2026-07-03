@@ -8,6 +8,8 @@ from ce_base_extractor.cli_commands import (
     run_diff,
     run_extract,
     run_import_scc,
+    run_profile_migrate,
+    run_scc_recheck,
     run_verify,
     run_watch,
 )
@@ -21,7 +23,7 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("-o", "--output", help="输出路径或目录（all 格式时为目录）")
     p.add_argument(
         "--format",
-        choices=("txt", "json", "py", "ct", "scc", "frida", "module", "all"),
+        choices=("txt", "json", "py", "ct", "scc", "frida", "lua", "module", "all"),
         default="txt",
     )
     p.add_argument("--top", type=int)
@@ -37,6 +39,7 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--pid", type=int)
     p.add_argument("--il2cpp-map")
     p.add_argument("--no-emulator", action="store_true")
+    p.add_argument("--no-live-probe", action="store_true")
     p.add_argument("--config")
 
 
@@ -67,8 +70,21 @@ def build_parser() -> argparse.ArgumentParser:
     watch_p.add_argument("folder", nargs="?", default=WATCH_DEFAULT)
     watch_p.add_argument("--interval", type=float, default=2.0)
     watch_p.add_argument("--auto-extract", action="store_true")
+    watch_p.add_argument("--incremental-cross", action="store_true")
+    watch_p.add_argument("--ptrid", type=int)
     watch_p.add_argument("--game", default="game")
     watch_p.add_argument("--config")
+
+    mig_p = sub.add_parser("profile-migrate", help="对比或迁移游戏 Profile")
+    mig_p.add_argument("--profile", required=True)
+    mig_p.add_argument("input", nargs="?", help="新 SQLite（与当前 profile 对比）")
+    mig_p.add_argument("--compare-with", help="历史版本 ID")
+    mig_p.add_argument("--save", action="store_true")
+
+    recheck_p = sub.add_parser("scc-recheck", help="SCC/Profile 定时复检")
+    recheck_p.add_argument("--profile", required=True)
+    recheck_p.add_argument("--scc")
+    recheck_p.add_argument("--pid", type=int)
 
     imp_p = sub.add_parser("import-scc", help="从 SCC JSON 导入并导出")
     imp_p.add_argument("input", help="SCC JSON 路径")
@@ -101,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         run_gui()
         return 0
 
-    subcommands = {"extract", "diff", "verify", "watch", "import-scc"}
+    subcommands = {"extract", "diff", "verify", "watch", "import-scc", "profile-migrate", "scc-recheck"}
     if argv[0] in subcommands:
         args = build_parser().parse_args(argv)
         if args.command == "extract":
@@ -112,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_verify(args)
         if args.command == "watch":
             return run_watch(args)
+        if args.command == "profile-migrate":
+            return run_profile_migrate(args)
+        if args.command == "scc-recheck":
+            return run_scc_recheck(args)
         return run_import_scc(args)
 
     legacy = _build_legacy_parser()

@@ -4,7 +4,9 @@ from pathlib import Path
 
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import save_result
+from ce_base_extractor.export.frida_guest import save_frida_guest_script
 from ce_base_extractor.export.frida_script import save_frida_script
+from ce_base_extractor.export.lua_script import save_lua_script
 from ce_base_extractor.export.python_module import save_python_module
 from ce_base_extractor.export.python_script import save_python_script
 from ce_base_extractor.export.scc_export import save_scc_json
@@ -54,5 +56,9 @@ def export_all(
             game_name=game_name,
             preset_id=preset_id,
         )
+    )
+    files.append(save_lua_script(result, out / f"{game_name}_reader.lua"))
+    files.append(
+        save_frida_guest_script(result, out / f"{game_name}_frida_guest.js")
     )
     return files

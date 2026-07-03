@@ -50,6 +50,13 @@ class ExtractConfig:
     pointer_size: int = 8
     target_pid: int | None = None
     il2cpp_map_path: str | None = None
+    live_probe: bool = True
+    probe_top_n: int = 10
+    probe_drop_unreadable: bool = False
+    fuzzy_dedupe: bool = True
+    fuzzy_last_offset_step: int = 0x8
+    cross_validate_require_all: bool = False
+    sqlite_module_prefilter: bool = True
 
     @classmethod
     def from_dict(cls, data: dict) -> ExtractConfig:
@@ -67,3 +74,4 @@ class ExtractResult:
     ptrid: int | None = None
     cross_validate_meta: dict | None = None
     module_stats: list[dict] = field(default_factory=list)
+    live_probe_meta: list[dict] | None = None

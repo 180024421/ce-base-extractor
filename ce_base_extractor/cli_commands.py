@@ -9,14 +9,17 @@ from ce_base_extractor.export.batch_export import export_all
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import save_result
 from ce_base_extractor.export.frida_script import save_frida_script
+from ce_base_extractor.export.lua_script import save_lua_script
 from ce_base_extractor.export.python_module import save_python_module
 from ce_base_extractor.export.python_script import save_python_script
 from ce_base_extractor.export.scc_export import save_scc_json
 from ce_base_extractor.io.scc_import import import_scc_to_result
 from ce_base_extractor.pipeline import extract, load_config
-from ce_base_extractor.profiles.store import ProfileStore
+from ce_base_extractor.profiles.migrate import compare_profiles
+from ce_base_extractor.profiles.store import GameProfile, ProfileStore
 from ce_base_extractor.verify.restart_verify import verify_restart_stability
 from ce_base_extractor.watch.folder_watcher import FolderWatcher
+from ce_base_extractor.watch.incremental_cross import IncrementalCrossValidator
 
 
 def run_extract(args) -> int:
@@ -43,6 +46,8 @@ def run_extract(args) -> int:
         cfg.target_pid = args.pid
     if args.il2cpp_map:
         cfg.il2cpp_map_path = args.il2cpp_map
+    if getattr(args, "no_live_probe", False):
+        cfg.live_probe = False
 
     input_path = Path(args.input)
     result = extract(input_path, config=cfg, extra_files=args.cross)
@@ -79,6 +84,9 @@ def run_extract(args) -> int:
     elif args.format == "frida":
         out = args.output or str(input_path.with_name(f"{cfg.game_name}_frida.js"))
         save_frida_script(result, out, game_name=cfg.game_name, preset_id=cfg.preset)
+    elif args.format == "lua":
+        out = args.output or str(input_path.with_name(f"{cfg.game_name}_reader.lua"))
+        save_lua_script(result, out)
     elif args.format == "module":
         out = args.output or str(input_path.with_name(f"{cfg.game_name}_memory.py"))
         save_python_module(
@@ -143,6 +151,10 @@ def run_watch(args) -> int:
     folder = Path(args.folder)
     folder.mkdir(parents=True, exist_ok=True)
     print(f"监视目录: {folder.resolve()}  (Ctrl+C 退出)")
+    incremental = IncrementalCrossValidator(
+        min_occurrences=max(load_config(args.config).cross_validate_min, 2),
+        ptrid=args.ptrid,
+    )
 
     def on_new(path: Path) -> None:
         print(f"[新文件] {path.name}")
@@ -150,8 +162,28 @@ def run_watch(args) -> int:
             cfg = load_config(args.config)
             cfg.game_name = args.game
             try:
-                result = extract(path, config=cfg)
-                print(f"  提取: {len(result.chains)} 条稳定链")
+                if getattr(args, "incremental_cross", False):
+                    info = incremental.add_file(path)
+                    print(
+                        f"  增量交叉: +{info['new_unique_keys']} 键, "
+                        f"稳定 {info['stable_keys']} 条"
+                    )
+                    stable = incremental.stable_chains()
+                    if stable:
+                        from ce_base_extractor.models import ExtractResult
+
+                        result = ExtractResult(
+                            chains=stable[: cfg.top_n],
+                            total_raw=len(stable),
+                            total_after_filter=min(len(stable), cfg.top_n),
+                            modules_seen=sorted({c.module_name for c in stable}),
+                            source_file=str(path),
+                            cross_validate_meta=incremental.meta(),
+                        )
+                        print(f"  当前稳定链: {len(result.chains)} 条")
+                else:
+                    result = extract(path, config=cfg)
+                    print(f"  提取: {len(result.chains)} 条稳定链")
             except Exception as exc:
                 print(f"  提取失败: {exc}", file=sys.stderr)
 
@@ -188,3 +220,42 @@ def run_import_scc(args) -> int:
 
     print(f"完成 → {path}")
     return 0
+
+
+def run_profile_migrate(args) -> int:
+    store = ProfileStore()
+    old = store.load(args.profile)
+    if args.compare_with:
+        new = store.load_version(args.profile, args.compare_with)
+    elif args.input:
+        from ce_base_extractor.models import ExtractConfig
+        from ce_base_extractor.pipeline import extract
+
+        cfg = ExtractConfig(game_name=args.profile, preset=old.preset, live_probe=False)
+        result = extract(args.input, config=cfg)
+        new = GameProfile.from_result(result, args.profile, preset=old.preset)
+    else:
+        print("请提供 input SQLite 或 --compare-with 历史版本", file=sys.stderr)
+        return 1
+
+    report = compare_profiles(old, new)
+    print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    if args.save:
+        store.save(new)
+        print(f"已保存新版本 → {args.profile}")
+    return 0
+
+
+def run_scc_recheck(args) -> int:
+    from ce_base_extractor.integrations.scc import scheduled_recheck_profile
+
+    result = scheduled_recheck_profile(
+        args.profile,
+        scc_path=args.scc,
+        pid=args.pid,
+    )
+    for item in result.details:
+        status = "稳定" if item["stable"] else f"失败: {item.get('error', '')}"
+        print(f"{item['name']}: {status}")
+    print(f"\n稳定 {result.stable}/{result.total}")
+    return 0 if result.ok else 2

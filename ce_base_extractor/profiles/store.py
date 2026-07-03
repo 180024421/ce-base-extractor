@@ -22,6 +22,7 @@ class GameProfile:
     target_pid: int | None = None
     chains: list[dict] = field(default_factory=list)
     updated_at: str = ""
+    version: int = 1
 
     @classmethod
     def from_result(
@@ -83,21 +84,51 @@ class ProfileStore:
     def __init__(self, directory: Path | None = None) -> None:
         self.directory = directory or _profiles_dir()
 
+    def _game_path(self, game_name: str) -> Path:
+        return self.directory / f"{game_name}.json"
+
+    def _versions_dir(self, game_name: str) -> Path:
+        d = self.directory / game_name / "versions"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def list_games(self) -> list[str]:
         return sorted(p.stem for p in self.directory.glob("*.json"))
 
+    def list_versions(self, game_name: str) -> list[str]:
+        vdir = self.directory / game_name / "versions"
+        if not vdir.is_dir():
+            return []
+        return sorted((p.stem for p in vdir.glob("*.json")), reverse=True)
+
     def save(self, profile: GameProfile) -> Path:
-        path = self.directory / f"{profile.game_name}.json"
-        path.write_text(
-            json.dumps(asdict(profile), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        existing = None
+        path = self._game_path(profile.game_name)
+        if path.is_file():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+                profile.version = int(existing.get("version", 1)) + 1
+            except (json.JSONDecodeError, TypeError):
+                profile.version = 2
+        else:
+            profile.version = 1
+
+        payload = asdict(profile)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        version_path = self._versions_dir(profile.game_name) / f"{stamp}.json"
+        version_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
     def load(self, game_name: str) -> GameProfile:
-        path = self.directory / f"{game_name}.json"
+        data = json.loads(self._game_path(game_name).read_text(encoding="utf-8"))
+        return GameProfile(**data)
+
+    def load_version(self, game_name: str, version_id: str) -> GameProfile:
+        path = self.directory / game_name / "versions" / f"{version_id}.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         return GameProfile(**data)
 
     def delete(self, game_name: str) -> None:
-        (self.directory / f"{game_name}.json").unlink(missing_ok=True)
+        self._game_path(game_name).unlink(missing_ok=True)
