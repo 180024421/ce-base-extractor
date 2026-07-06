@@ -13,7 +13,7 @@ from ce_base_extractor.filters.stream_rank import filter_and_rank_stream, module
 from ce_base_extractor.il2cpp.mapper import apply_il2cpp_hints, load_il2cpp_map
 from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
 from ce_base_extractor.parsers.chain_io import iter_file_chains
-from ce_base_extractor.parsers.ptr_parser import load_ptr
+from ce_base_extractor.parsers.ptr_parser import iter_ptr_chains, load_ptr_meta
 from ce_base_extractor.parsers.sqlite_parser import load_sqlite, load_sqlite_meta
 from ce_base_extractor.verify.live_probe import probe_chains
 
@@ -114,6 +114,16 @@ def _load_chains(
             }
         return load_sqlite(input_path, ptrid=resolved_ptrid, module_ids=module_ids)
     if suffix == ".ptr":
+        if cfg.stream_single_file:
+            it = iter_ptr_chains(input_path)
+            chains, total, mod_counts = filter_and_rank_stream(it, cfg, on_progress=on_progress)
+            meta = load_ptr_meta(input_path)
+            meta["result_count"] = total
+            meta["_module_counts"] = mod_counts
+            meta["_streamed"] = True
+            return chains, meta
+        from ce_base_extractor.parsers.ptr_parser import load_ptr
+
         return load_ptr(input_path)
     raise ValueError(f"不支持的文件类型: {suffix}，请使用 .sqlite / .db 或 .PTR")
 
@@ -151,8 +161,12 @@ def extract(
             fuzzy_last_offset_step=cfg.fuzzy_last_offset_step,
             sqlite_threshold=cfg.cross_validate_sqlite_threshold,
             force_sqlite_backend=cfg.cross_validate_force_sqlite,
+            cfg=cfg,
         )
         total_raw = int(cross_meta.get("stable_keys", len(chains)))
+        if cross_meta.get("ranked"):
+            streamed = True
+            module_counts = cross_meta.get("_module_counts")
         modules_seen = sorted({c.module_name for c in chains})
         ptrid = cfg.ptrid
         source = ", ".join(str(p.name) for p in all_files)

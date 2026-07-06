@@ -48,6 +48,8 @@ def run_extract(args) -> int:
         cfg.il2cpp_map_path = args.il2cpp_map
     if getattr(args, "no_live_probe", False):
         cfg.live_probe = False
+    if getattr(args, "android_package", None):
+        cfg.android_package = args.android_package
 
     input_path = Path(args.input)
     result = extract(input_path, config=cfg, extra_files=args.cross)
@@ -61,6 +63,7 @@ def run_extract(args) -> int:
             preset_id=cfg.preset,
             pointer_size=cfg.pointer_size,
             target_pid=cfg.target_pid,
+            android_package=cfg.android_package,
         )
         print(f"完成: 导出 {len(files)} 个文件 → {out_dir}")
         return 0
@@ -106,11 +109,27 @@ def run_extract(args) -> int:
 
 def run_diff(args) -> int:
     ptrid = args.ptrid
+    fuzzy = not getattr(args, "no_fuzzy", False)
+    cfg = load_config(getattr(args, "config", None))
+    fuzzy_step = cfg.fuzzy_last_offset_step
     if len(args.files) == 2:
-        diff = diff_sqlite_files(args.files[0], args.files[1], ptrid=ptrid)
+        diff = diff_sqlite_files(
+            args.files[0],
+            args.files[1],
+            ptrid=ptrid,
+            fuzzy=fuzzy,
+            fuzzy_last_offset_step=fuzzy_step,
+        )
         print(json.dumps(diff, ensure_ascii=False, indent=2))
     else:
-        diff = diff_sqlite_many(args.files, ptrid=ptrid)
+        diff = diff_sqlite_many(
+            args.files,
+            ptrid=ptrid,
+            fuzzy=fuzzy,
+            fuzzy_last_offset_step=fuzzy_step,
+            sqlite_threshold=cfg.cross_validate_sqlite_threshold,
+            force_sqlite_backend=cfg.cross_validate_force_sqlite,
+        )
         print(json.dumps(diff, ensure_ascii=False, indent=2))
     return 0
 
@@ -203,7 +222,10 @@ def run_watch(args) -> int:
 
             time.sleep(1)
     except KeyboardInterrupt:
+        pass
+    finally:
         watcher.stop()
+        incremental.close()
         print("\n已停止监视")
     return 0
 

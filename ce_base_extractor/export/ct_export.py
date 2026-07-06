@@ -6,6 +6,24 @@ from xml.dom import minidom
 from ce_base_extractor.export.formatter import format_ce_table
 from ce_base_extractor.models import ExtractResult, PointerChain
 
+_CT_TYPE_MAP = {
+    "int8": "Byte",
+    "uint8": "Byte",
+    "byte": "Byte",
+    "int16": "2 Bytes",
+    "uint16": "2 Bytes",
+    "int32": "4 Bytes",
+    "uint32": "4 Bytes",
+    "int64": "8 Bytes",
+    "uint64": "8 Bytes",
+    "float": "Float",
+    "double": "Double",
+}
+
+
+def _ct_variable_type(value_type: str) -> str:
+    return _CT_TYPE_MAP.get(value_type.lower(), "4 Bytes")
+
 
 def _prettify(elem: ET.Element) -> str:
     rough = ET.tostring(elem, encoding="unicode")
@@ -34,7 +52,7 @@ def chains_to_ct(
         entry = ET.SubElement(entries_parent, "CheatEntry")
         ET.SubElement(entry, "ID").text = str(i)
         ET.SubElement(entry, "Description").text = f"{chain.module_name}+0x{chain.module_offset:X}"
-        ET.SubElement(entry, "VariableType").text = "4 Bytes"
+        ET.SubElement(entry, "VariableType").text = _ct_variable_type(chain.value_type)
         ET.SubElement(entry, "Address").text = format_ce_table(chain)
 
     cheat_table = ET.SubElement(root, "CheatTableMeta")

@@ -134,6 +134,7 @@ class AuxMixin:
     def _stop_monitor(self) -> None:
         self._monitor_running = False
         self.monitor_btn.configure(text="开始监控")
+        self._monitor_errors = 0
         if self._monitor_job:
             self.after_cancel(self._monitor_job)
             self._monitor_job = None
@@ -151,9 +152,13 @@ class AuxMixin:
             names = list(preset.process_names) if preset else ["dnplayer.exe"]
             if self._monitor_mem is None:
                 self._monitor_mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            elif self._target_pid and self._monitor_mem.pid != self._target_pid:
+                self._monitor_mem.close()
+                self._monitor_mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
             mem = self._monitor_mem
             ps = int(self.pointer_size_var.get())
             now = datetime.now().strftime("%H:%M:%S")
+            tick_errors = 0
             for item in self.monitor_tree.get_children():
                 self.monitor_tree.delete(item)
             for i, chain in enumerate(self._result.chains, 1):
@@ -169,14 +174,26 @@ class AuxMixin:
                         "", tk.END, values=(name, val, chain.value_type, now), tags=(tag,)
                     )
                 except Exception as exc:
+                    tick_errors += 1
                     self.monitor_tree.insert(
                         "", tk.END, values=(name, f"ERR: {exc}", chain.value_type, now)
                     )
+            if tick_errors:
+                self._monitor_errors += 1
+                mem.invalidate_module_cache()
+                if self._monitor_errors >= 2:
+                    mem.close()
+                    self._monitor_mem = None
+                    self._monitor_errors = 0
+            else:
+                self._monitor_errors = 0
         except Exception as exc:
             self.status_var.set(f"监控错误: {exc}")
             if self._monitor_mem:
+                self._monitor_mem.invalidate_module_cache()
                 self._monitor_mem.close()
                 self._monitor_mem = None
+            self._monitor_errors = 0
 
         interval = max(1, int(self.monitor_interval_var.get())) * 1000
         self._monitor_job = self.after(interval, self._monitor_tick)

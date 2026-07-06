@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ce-base-extractor"
-version = "0.5.2"
+version = "0.5.3"
 description = "从 Cheat Engine 指针扫描结果一键提取稳定基址（模拟器优化）"
 readme = "README.md"
 requires-python = ">=3.10"

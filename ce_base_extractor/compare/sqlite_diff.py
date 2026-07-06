@@ -11,11 +11,19 @@ def _keys_from_file(
     path: str | Path,
     ptrid: int | None,
     *,
-    fuzzy: bool = False,
+    fuzzy: bool = True,
+    fuzzy_last_offset_step: int = 0x8,
 ) -> dict[tuple, int]:
     keys: dict[tuple, int] = {}
     for chain in iter_file_chains(path, ptrid=ptrid):
-        key = fuzzy_dedupe_key(chain, ignore_last_offset=True) if fuzzy else chain.dedupe_key()
+        if fuzzy:
+            key = fuzzy_dedupe_key(
+                chain,
+                last_offset_tolerance=fuzzy_last_offset_step,
+                ignore_last_offset=True,
+            )
+        else:
+            key = chain.dedupe_key()
         keys[key] = keys.get(key, 0) + 1
     return keys
 
@@ -24,9 +32,26 @@ def diff_sqlite_files(
     file_a: str | Path,
     file_b: str | Path,
     ptrid: int | None = None,
+    *,
+    fuzzy: bool = True,
+    fuzzy_last_offset_step: int = 0x8,
 ) -> dict:
-    set_a = set(_keys_from_file(file_a, ptrid).keys())
-    set_b = set(_keys_from_file(file_b, ptrid).keys())
+    set_a = set(
+        _keys_from_file(
+            file_a,
+            ptrid,
+            fuzzy=fuzzy,
+            fuzzy_last_offset_step=fuzzy_last_offset_step,
+        ).keys()
+    )
+    set_b = set(
+        _keys_from_file(
+            file_b,
+            ptrid,
+            fuzzy=fuzzy,
+            fuzzy_last_offset_step=fuzzy_last_offset_step,
+        ).keys()
+    )
     common = set_a & set_b
     only_a = set_a - set_b
     only_b = set_b - set_a
@@ -39,6 +64,7 @@ def diff_sqlite_files(
         "only_a": len(only_a),
         "only_b": len(only_b),
         "stability_ratio": round(len(common) / max(len(set_a), 1), 4),
+        "fuzzy": fuzzy,
         "common_keys": list(common)[:50],
     }
 
@@ -47,6 +73,8 @@ def diff_sqlite_many(
     files: list[str | Path],
     ptrid: int | None = None,
     *,
+    fuzzy: bool = True,
+    fuzzy_last_offset_step: int = 0x8,
     sqlite_threshold: int = DEFAULT_SQLITE_THRESHOLD,
     force_sqlite_backend: bool = False,
 ) -> dict:
@@ -65,7 +93,14 @@ def diff_sqlite_many(
         for path in paths:
             seen: dict[tuple, object] = {}
             for chain in iter_file_chains(path, ptrid=ptrid):
-                key = chain.dedupe_key()
+                if fuzzy:
+                    key = fuzzy_dedupe_key(
+                        chain,
+                        last_offset_tolerance=fuzzy_last_offset_step,
+                        ignore_last_offset=True,
+                    )
+                else:
+                    key = chain.dedupe_key()
                 if key not in seen:
                     seen[key] = chain
             per_file_counts.append(len(seen))
@@ -73,7 +108,7 @@ def diff_sqlite_many(
 
         n = len(paths)
         histogram: dict[int, int] = {}
-        for _chain, count in counter.items_at_least(1):
+        for _chain, count in counter.iter_items_at_least(1):
             histogram[count] = histogram.get(count, 0) + 1
 
         in_all = counter.count_in_all()
@@ -86,6 +121,7 @@ def diff_sqlite_many(
             "in_all": in_all,
             "stability_ratio": round(in_all / max(union_size, 1), 4),
             "occurrence_histogram": dict(sorted(histogram.items())),
+            "fuzzy": fuzzy,
             "common_keys": [],
             "key_backend": counter.backend,
         }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.3 (2026-07-06)
+
+### 准确率 / 一致性
+- GUI 实时监控：读失败时失效模块缓存，连续失败自动重连
+- diff 默认 fuzzy，与交叉验证口径对齐（`--no-fuzzy` 可关闭）
+- CT 导出按 `value_type` 映射 VariableType
+
+### 性能
+- 交叉验证流式 Top-N：`filter_and_rank_cross_stream`，不再全量驻内存
+- key_store SQLite 批量 UPSERT（去掉逐键 SELECT）
+- 单文件 `.PTR` 接入 `stream_rank` 流式管线
+
+### CLI / 监视
+- `--android-package` 传入 `export_all`
+- watch 退出时 `incremental.close()`；FolderWatcher 支持 `.ptr`
+- GUI 记录读数失败字段可见
+
 ## 0.5.2 (2026-07-06)
 
 ### 性能 / 架构

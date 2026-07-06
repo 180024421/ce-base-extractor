@@ -240,6 +240,7 @@ class ExtractMixin:
             names = list(preset.process_names) if preset else ["dnplayer.exe"]
             mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
             self._before_verify.clear()
+            failed: list[str] = []
             with mem:
                 for i, chain in enumerate(self._result.chains, 1):
                     name = chain.export_name(i)
@@ -248,10 +249,13 @@ class ExtractMixin:
                             mem, chain, int(self.pointer_size_var.get())
                         )
                     except Exception:
-                        pass
-            messagebox.showinfo(
-                "记录读数", f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」"
-            )
+                        failed.append(name)
+            msg = f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」"
+            if failed:
+                msg += f"\n\n读取失败 {len(failed)} 个: {', '.join(failed[:8])}"
+                if len(failed) > 8:
+                    msg += " …"
+            messagebox.showinfo("记录读数", msg)
             game = self.game_name_var.get().strip()
             if game:
                 try:

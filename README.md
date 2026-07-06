@@ -19,10 +19,14 @@ flowchart LR
   I --> J[python game_reader.py]
 ```
 
-## 功能一览（v0.5.2）
+## 功能一览（v0.5.3）
 
 | 功能 | 说明 |
 |------|------|
+| 交叉流式 Top-N | 稳定链不再全量进内存再裁剪 |
+| diff fuzzy 对齐 | 与交叉验证默认同口径 |
+| PTR 流式提取 | 大 `.PTR` 走 stream_rank |
+| 监控缓存失效 | 模拟器重启后自动重连 |
 | PTR mmap | `.PTR` 大文件 mmap 流式解析 |
 | 键计数 spill | 交叉验证超 20 万键自动 SQLite 落盘 |
 | GUI 模块化 | mixin 拆分，便于维护 |

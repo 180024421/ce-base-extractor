@@ -38,6 +38,7 @@ def _add_extract_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--pointer-size", type=int, choices=(4, 8))
     p.add_argument("--pid", type=int)
     p.add_argument("--il2cpp-map")
+    p.add_argument("--android-package", help="Android 包名（Frida guest / SCC 导出）")
     p.add_argument("--no-emulator", action="store_true")
     p.add_argument("--no-live-probe", action="store_true")
     p.add_argument("--config")
@@ -56,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     diff_p = sub.add_parser("diff", help="对比 2～N 份 SQLite 扫描结果")
     diff_p.add_argument("files", nargs="+", help="SQLite 文件路径")
     diff_p.add_argument("--ptrid", type=int)
+    diff_p.add_argument(
+        "--no-fuzzy", action="store_true", help="禁用 fuzzy 对齐（默认与交叉验证一致）"
+    )
+    diff_p.add_argument("--config")
 
     verify_p = sub.add_parser("verify", help="重启后验证已保存的游戏配置")
     verify_p.add_argument("--profile", required=True, help="游戏配置名")

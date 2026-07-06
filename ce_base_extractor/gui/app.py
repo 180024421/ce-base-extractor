@@ -43,6 +43,7 @@ class App(
         self._monitor_running = False
         self._monitor_job = None
         self._monitor_prev: dict = {}
+        self._monitor_errors = 0
         self._extract_busy = False
         self._incremental_cross: IncrementalCrossValidator | None = None
         self._monitor_mem = None

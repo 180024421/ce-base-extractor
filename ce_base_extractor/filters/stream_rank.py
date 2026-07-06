@@ -11,6 +11,70 @@ from ce_base_extractor.filters.scorer import _chain_passes, _score_chain
 from ce_base_extractor.models import ExtractConfig, PointerChain
 
 
+def filter_and_rank_cross_stream(
+    stable_iter: Iterator[tuple[PointerChain, int]],
+    cfg: ExtractConfig,
+    total_files: int,
+    *,
+    max_buffer: int | None = None,
+) -> tuple[list[PointerChain], int, dict[str, int]]:
+    """交叉验证稳定链流式打分，只保留 Top-N buffer，避免全量驻内存。"""
+    buf_cap = max_buffer or max(cfg.top_n * 20, 500)
+    seen: set[tuple] = set()
+    module_counts: dict[str, int] = defaultdict(int)
+    filtered: list[PointerChain] = []
+    stable_count = 0
+
+    for chain, count in stable_iter:
+        stable_count += 1
+        tagged = PointerChain(
+            module_name=chain.module_name,
+            module_offset=chain.module_offset,
+            offsets=chain.offsets,
+            score=float(count),
+            source=f"cross_validate:{count}/{total_files}",
+            field_name=chain.field_name,
+            value_type=chain.value_type,
+            verified=chain.verified,
+            il2cpp_symbol=chain.il2cpp_symbol,
+        )
+        module_counts[tagged.module_name] += 1
+        if not _chain_passes(tagged, cfg):
+            continue
+        key = tagged.dedupe_key()
+        if cfg.dedupe and key in seen:
+            continue
+        seen.add(key)
+        score = _score_chain(tagged, cfg)
+        if score < cfg.min_score:
+            continue
+        filtered.append(
+            PointerChain(
+                module_name=tagged.module_name,
+                module_offset=tagged.module_offset,
+                offsets=tagged.offsets,
+                score=score,
+                source=tagged.source,
+                field_name=tagged.field_name,
+                value_type=tagged.value_type,
+                verified=tagged.verified,
+                il2cpp_symbol=tagged.il2cpp_symbol,
+            )
+        )
+        if len(filtered) > buf_cap:
+            filtered.sort(key=lambda c: (-c.score, c.depth, c.module_name.lower()))
+            filtered = filtered[:buf_cap]
+
+    if cfg.fuzzy_dedupe and len(filtered) > 1:
+        filtered = merge_fuzzy_duplicates(
+            filtered,
+            last_offset_tolerance=cfg.fuzzy_last_offset_step,
+        )
+
+    filtered.sort(key=lambda c: (-c.score, c.depth, c.module_name.lower()))
+    return filtered[: cfg.top_n], stable_count, dict(module_counts)
+
+
 def filter_and_rank_stream(
     chain_iter: Iterator[PointerChain],
     cfg: ExtractConfig,

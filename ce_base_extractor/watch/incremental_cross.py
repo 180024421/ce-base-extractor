@@ -57,7 +57,7 @@ class IncrementalCrossValidator:
             "file": str(path),
             "new_unique_keys": self._counter.unique_count() - before_unique,
             "file_count": len(self._files),
-            "stable_keys": len(self.stable_chains()),
+            "stable_keys": self._counter.count_at_least(self.min_occurrences),
         }
 
     def stable_chains(self) -> list[PointerChain]:
@@ -82,7 +82,7 @@ class IncrementalCrossValidator:
             "files": list(self._files),
             "min_occurrences": self.min_occurrences,
             "unique_keys": self._counter.unique_count(),
-            "stable_keys": len(self.stable_chains()),
+            "stable_keys": self._counter.count_at_least(self.min_occurrences),
             "in_all": in_all,
             "stability_ratio": round(in_all / max(self._counter.unique_count(), 1), 4),
             "streaming": True,

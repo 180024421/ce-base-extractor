@@ -5,9 +5,11 @@ import time
 from pathlib import Path
 from typing import Callable
 
+WATCH_PATTERNS = ("*.sqlite", "*.db", "*.sqlite3", "*.ptr", "*.PTR")
+
 
 class FolderWatcher:
-    """监视 CE 导出目录，新 .sqlite 文件出现时回调。"""
+    """监视 CE 导出目录，新 SQLite/PTR 文件出现时回调。"""
 
     def __init__(
         self,
@@ -27,7 +29,7 @@ class FolderWatcher:
     def _scan_existing(self) -> None:
         if not self.folder.is_dir():
             return
-        for pattern in ("*.sqlite", "*.db", "*.sqlite3"):
+        for pattern in WATCH_PATTERNS:
             for p in self.folder.glob(pattern):
                 self._seen.add(str(p.resolve()))
 
@@ -46,7 +48,7 @@ class FolderWatcher:
     def _loop(self) -> None:
         while not self._stop.is_set():
             if self.folder.is_dir():
-                for pattern in ("*.sqlite", "*.db", "*.sqlite3"):
+                for pattern in WATCH_PATTERNS:
                     for path in self.folder.glob(pattern):
                         key = str(path.resolve())
                         if key not in self._seen:

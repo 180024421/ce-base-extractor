@@ -179,18 +179,23 @@ def iter_ptr_chains(path: str | Path) -> Iterator[PointerChain]:
             yield from _iter_ptr_from_view(memoryview(mm))
 
 
-def load_ptr(path: str | Path) -> tuple[list[PointerChain], dict]:
+def load_ptr_meta(path: str | Path) -> dict:
     ptr_path = Path(path)
-    chains = list(iter_ptr_chains(ptr_path))
     with ptr_path.open("rb") as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
             header, _ = _parse_header(memoryview(mm))
-    meta = {
+    return {
         "module_count": len(header["modules"]),
         "modules": header["modules"],
-        "result_count": len(chains),
         "version": header["version"],
         "compressed": header["compressed"],
         "mmap": True,
     }
+
+
+def load_ptr(path: str | Path) -> tuple[list[PointerChain], dict]:
+    ptr_path = Path(path)
+    chains = list(iter_ptr_chains(ptr_path))
+    meta = load_ptr_meta(ptr_path)
+    meta["result_count"] = len(chains)
     return chains, meta
