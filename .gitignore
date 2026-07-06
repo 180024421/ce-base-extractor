@@ -17,3 +17,6 @@ examples/sample_*.sqlite
 examples/*.reader.py
 .idea/
 .vscode/
+
+.coverage
+htmlcov/
