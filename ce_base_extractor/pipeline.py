@@ -149,6 +149,8 @@ def extract(
             module_ids=module_ids,
             fuzzy=cfg.cross_validate_fuzzy,
             fuzzy_last_offset_step=cfg.fuzzy_last_offset_step,
+            sqlite_threshold=cfg.cross_validate_sqlite_threshold,
+            force_sqlite_backend=cfg.cross_validate_force_sqlite,
         )
         total_raw = int(cross_meta.get("stable_keys", len(chains)))
         modules_seen = sorted({c.module_name for c in chains})

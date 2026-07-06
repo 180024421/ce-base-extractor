@@ -19,10 +19,13 @@ flowchart LR
   I --> J[python game_reader.py]
 ```
 
-## 功能一览（v0.5.1）
+## 功能一览（v0.5.2）
 
 | 功能 | 说明 |
 |------|------|
+| PTR mmap | `.PTR` 大文件 mmap 流式解析 |
+| 键计数 spill | 交叉验证超 20 万键自动 SQLite 落盘 |
+| GUI 模块化 | mixin 拆分，便于维护 |
 | 交叉验证 fuzzy | 末 offset 容差对齐，3/3 优先 |
 | 在线探针 | Top N 可读性验证 + 类型推断 |
 | 流式提取 | 大 SQLite 不 OOM，扫描进度显示 |

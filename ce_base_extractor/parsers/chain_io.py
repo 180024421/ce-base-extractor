@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from ce_base_extractor.models import PointerChain
-from ce_base_extractor.parsers.ptr_parser import load_ptr
+from ce_base_extractor.parsers.ptr_parser import iter_ptr_chains
 from ce_base_extractor.parsers.sqlite_parser import iter_sqlite_chains
 
 
@@ -22,7 +22,6 @@ def iter_file_chains(
         yield from iter_sqlite_chains(path, ptrid=ptrid, module_ids=module_ids)
         return
     if suffix == ".ptr":
-        chains, _ = load_ptr(path)
-        yield from chains
+        yield from iter_ptr_chains(path)
         return
     raise ValueError(f"不支持的文件: {path}")

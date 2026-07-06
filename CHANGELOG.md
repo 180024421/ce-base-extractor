@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2 (2026-07-06)
+
+### 性能 / 架构
+- **PTR mmap 流式**：`iter_ptr_chains()` 避免整文件读入内存
+- **交叉验证键计数 spill**：`ChainKeyCounter` 超阈值自动落 SQLite（`cross_validate_sqlite_threshold`）
+- **GUI 模块化**：`app.py` 拆为 Shell/Core/Extract/Cross/Aux mixins
+
+### 测试
+- `test_ptr_and_keystore.py`：PTR 迭代、Counter spill、SQLite backend
+
 ## 0.5.1 (2026-07-06)
 
 ### 准确率

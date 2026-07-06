@@ -60,6 +60,8 @@ class ExtractConfig:
     cross_validate_fuzzy: bool = True
     sqlite_module_prefilter: bool = True
     stream_single_file: bool = True
+    cross_validate_sqlite_threshold: int = 200_000
+    cross_validate_force_sqlite: bool = False
 
     def validate(self) -> ExtractConfig:
         if self.top_n < 1:

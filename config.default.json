@@ -23,5 +23,7 @@
   "fuzzy_dedupe": true,
   "fuzzy_last_offset_step": 8,
   "sqlite_module_prefilter": true,
-  "stream_single_file": true
+  "stream_single_file": true,
+  "cross_validate_sqlite_threshold": 200000,
+  "cross_validate_force_sqlite": false
 }
