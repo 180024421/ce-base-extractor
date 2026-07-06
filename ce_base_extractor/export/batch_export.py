@@ -20,6 +20,9 @@ def export_all(
     preset_id: str = "ldplayer",
     pointer_size: int = 8,
     target_pid: int | None = None,
+    *,
+    android_package: str = "",
+    snapshots: dict[str, dict] | None = None,
 ) -> list[Path]:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -27,7 +30,15 @@ def export_all(
 
     files.append(save_result(result, out / f"{game_name}.bases.txt", fmt="txt"))
     files.append(save_result(result, out / f"{game_name}.bases.json", fmt="json"))
-    files.append(save_scc_json(result, out / f"{game_name}_scc.json", preset_id=preset_id))
+    files.append(
+        save_scc_json(
+            result,
+            out / f"{game_name}_scc.json",
+            preset_id=preset_id,
+            snapshots=snapshots,
+            android_package=android_package,
+        )
+    )
     (out / f"{game_name}.CT").write_text(result_to_ct(result, title=game_name), encoding="utf-8")
     files.append(out / f"{game_name}.CT")
     files.append(
@@ -59,6 +70,10 @@ def export_all(
     )
     files.append(save_lua_script(result, out / f"{game_name}_reader.lua"))
     files.append(
-        save_frida_guest_script(result, out / f"{game_name}_frida_guest.js")
+        save_frida_guest_script(
+            result,
+            out / f"{game_name}_frida_guest.js",
+            package=android_package or "com.example.game",
+        )
     )
     return files

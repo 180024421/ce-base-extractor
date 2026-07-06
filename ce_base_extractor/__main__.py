@@ -85,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     recheck_p.add_argument("--profile", required=True)
     recheck_p.add_argument("--scc")
     recheck_p.add_argument("--pid", type=int)
+    recheck_p.add_argument("--require-value-match", action="store_true")
 
     imp_p = sub.add_parser("import-scc", help="从 SCC JSON 导入并导出")
     imp_p.add_argument("input", help="SCC JSON 路径")
@@ -117,7 +118,15 @@ def main(argv: list[str] | None = None) -> int:
         run_gui()
         return 0
 
-    subcommands = {"extract", "diff", "verify", "watch", "import-scc", "profile-migrate", "scc-recheck"}
+    subcommands = {
+        "extract",
+        "diff",
+        "verify",
+        "watch",
+        "import-scc",
+        "profile-migrate",
+        "scc-recheck",
+    }
     if argv[0] in subcommands:
         args = build_parser().parse_args(argv)
         if args.command == "extract":

@@ -5,24 +5,45 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from ce_base_extractor.filters.cross_validate import _iter_file_chains
+from ce_base_extractor.filters.fuzzy_dedupe import fuzzy_dedupe_key
 from ce_base_extractor.models import PointerChain
+from ce_base_extractor.parsers.chain_io import iter_file_chains
 
 
 class IncrementalCrossValidator:
-    def __init__(self, min_occurrences: int = 2, ptrid: int | None = None) -> None:
+    def __init__(
+        self,
+        min_occurrences: int = 2,
+        ptrid: int | None = None,
+        *,
+        fuzzy: bool = True,
+        fuzzy_last_offset_step: int = 0x8,
+        module_ids: set[int] | None = None,
+    ) -> None:
         self.min_occurrences = min_occurrences
         self.ptrid = ptrid
+        self.fuzzy = fuzzy
+        self.fuzzy_last_offset_step = fuzzy_last_offset_step
+        self.module_ids = module_ids
         self._counter: Counter[tuple] = Counter()
         self._exemplar: dict[tuple, PointerChain] = {}
         self._files: list[str] = []
+
+    def _key(self, chain: PointerChain) -> tuple:
+        if self.fuzzy:
+            return fuzzy_dedupe_key(
+                chain,
+                last_offset_tolerance=self.fuzzy_last_offset_step,
+                ignore_last_offset=True,
+            )
+        return chain.dedupe_key()
 
     def add_file(self, path: str | Path) -> dict:
         path = Path(path)
         seen: set[tuple] = set()
         added_keys = 0
-        for chain in _iter_file_chains(path, self.ptrid):
-            key = chain.dedupe_key()
+        for chain in iter_file_chains(path, self.ptrid, module_ids=self.module_ids):
+            key = self._key(chain)
             if key in seen:
                 continue
             seen.add(key)
@@ -68,4 +89,5 @@ class IncrementalCrossValidator:
             "stability_ratio": round(in_all / max(len(self._counter), 1), 4),
             "streaming": True,
             "incremental": True,
+            "fuzzy": self.fuzzy,
         }

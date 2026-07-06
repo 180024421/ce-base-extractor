@@ -13,6 +13,8 @@ def test_probe_bonus_on_success():
         mem.__enter__ = MagicMock(return_value=mem)
         mem.__exit__ = MagicMock(return_value=False)
         mem.resolve_chain.return_value = 0x1234
+        mem.read_i32.return_value = 99
+        mem.read_f32.return_value = 99.0
         with patch("ce_base_extractor.verify.live_probe.read_chain_value", return_value=99):
             out, results = probe_chains(chains, cfg)
     assert results[0].readable is True

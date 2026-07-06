@@ -11,14 +11,17 @@
   "required_end_offset": null,
   "cross_validate_min": 2,
   "cross_validate_require_all": false,
+  "cross_validate_fuzzy": true,
   "game_name": "game",
   "pointer_size": 8,
   "target_pid": null,
   "il2cpp_map_path": null,
+  "android_package": "",
   "live_probe": true,
   "probe_top_n": 10,
-  "probe_drop_unreadable": false,
+  "probe_drop_unreadable": true,
   "fuzzy_dedupe": true,
   "fuzzy_last_offset_step": 8,
-  "sqlite_module_prefilter": true
+  "sqlite_module_prefilter": true,
+  "stream_single_file": true
 }

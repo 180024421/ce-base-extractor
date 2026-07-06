@@ -17,11 +17,46 @@ class LiveProbeResult:
     error: str = ""
 
 
+def _infer_type_and_read(
+    mem: ProcessMemory,
+    chain: PointerChain,
+    pointer_size: int,
+) -> tuple[str, int | float | bytes]:
+    addr = mem.resolve_chain(
+        chain.module_name,
+        chain.module_offset,
+        chain.offsets,
+        pointer_size,
+    )
+    vtype = chain.value_type or "int32"
+    if vtype in ("float", "double"):
+        return vtype, read_chain_value(mem, chain, pointer_size)
+
+    try:
+        f32 = mem.read_f32(addr)
+        i32 = mem.read_i32(addr)
+    except OSError:
+        return vtype, read_chain_value(mem, chain, pointer_size)
+
+    if vtype == "int32" and f32 != 0 and abs(f32) < 1e7:
+        frac = abs(f32 - round(f32))
+        if 0.001 < frac < 0.999:
+            probe_chain = PointerChain(
+                module_name=chain.module_name,
+                module_offset=chain.module_offset,
+                offsets=chain.offsets,
+                value_type="float",
+            )
+            return "float", read_chain_value(mem, probe_chain, pointer_size)
+    return vtype, i32
+
+
 def probe_chains(
     chains: list[PointerChain],
     cfg: ExtractConfig,
     *,
     top_n: int | None = None,
+    il2cpp_map: dict[int, str] | None = None,
 ) -> tuple[list[PointerChain], list[LiveProbeResult]]:
     """对前 top_n 条链做内存探针；不可读的降权，可读加分。"""
     if not cfg.live_probe or not chains:
@@ -59,13 +94,7 @@ def probe_chains(
     with mem:
         for chain in targets:
             try:
-                mem.resolve_chain(
-                    chain.module_name,
-                    chain.module_offset,
-                    chain.offsets,
-                    cfg.pointer_size,
-                )
-                val = read_chain_value(mem, chain, cfg.pointer_size)
+                vtype, val = _infer_type_and_read(mem, chain, cfg.pointer_size)
                 bonus = 40.0
                 probed.append(
                     PointerChain(
@@ -75,7 +104,7 @@ def probe_chains(
                         score=chain.score + bonus,
                         source=chain.source + "|probe_ok",
                         field_name=chain.field_name,
-                        value_type=chain.value_type,
+                        value_type=vtype,
                         verified=True,
                         il2cpp_symbol=chain.il2cpp_symbol,
                     )
@@ -99,5 +128,5 @@ def probe_chains(
 
     probed.sort(key=lambda c: -c.score)
     if cfg.probe_drop_unreadable:
-        probed = [c for c in probed if c.verified or "|probe_ok" in c.source]
+        probed = [c for c in probed if c.verified]
     return probed + rest, results

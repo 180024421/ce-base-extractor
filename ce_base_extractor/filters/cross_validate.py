@@ -3,21 +3,9 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+from ce_base_extractor.filters.fuzzy_dedupe import fuzzy_dedupe_key
 from ce_base_extractor.models import PointerChain
-from ce_base_extractor.parsers.ptr_parser import load_ptr
-from ce_base_extractor.parsers.sqlite_parser import iter_sqlite_chains
-
-
-def _iter_file_chains(path: Path, ptrid: int | None):
-    suffix = path.suffix.lower()
-    if suffix in (".db", ".sqlite", ".sqlite3"):
-        yield from iter_sqlite_chains(path, ptrid=ptrid)
-        return
-    if suffix == ".ptr":
-        chains, _ = load_ptr(path)
-        yield from chains
-        return
-    raise ValueError(f"不支持的文件: {path}")
+from ce_base_extractor.parsers.chain_io import iter_file_chains
 
 
 def cross_validate_files(
@@ -26,6 +14,9 @@ def cross_validate_files(
     ptrid: int | None = None,
     *,
     require_all: bool = False,
+    module_ids: set[int] | None = None,
+    fuzzy: bool = True,
+    fuzzy_last_offset_step: int = 0x8,
 ) -> tuple[list[PointerChain], dict]:
     if len(files) < min_occurrences:
         raise ValueError(f"交叉验证至少需要 {min_occurrences} 个文件")
@@ -33,11 +24,20 @@ def cross_validate_files(
     counter: Counter[tuple] = Counter()
     exemplar: dict[tuple, PointerChain] = {}
 
+    def _key(chain: PointerChain) -> tuple:
+        if fuzzy:
+            return fuzzy_dedupe_key(
+                chain,
+                last_offset_tolerance=fuzzy_last_offset_step,
+                ignore_last_offset=True,
+            )
+        return chain.dedupe_key()
+
     for fp in files:
         path = Path(fp)
         seen_in_file: set[tuple] = set()
-        for chain in _iter_file_chains(path, ptrid):
-            key = chain.dedupe_key()
+        for chain in iter_file_chains(path, ptrid=ptrid, module_ids=module_ids):
+            key = _key(chain)
             if key in seen_in_file:
                 continue
             seen_in_file.add(key)
@@ -78,6 +78,8 @@ def cross_validate_files(
         "in_all": in_all,
         "stability_ratio": round(in_all / max(len(counter), 1), 4),
         "require_all": require_all,
+        "fuzzy": fuzzy,
+        "module_prefilter": sorted(module_ids) if module_ids else None,
         "streaming": True,
     }
     return stable, meta

@@ -166,3 +166,21 @@ def load_sqlite(
         return chains, meta
     finally:
         conn.close()
+
+
+def load_sqlite_meta(path: str | Path, ptrid: int | None = None) -> dict:
+    """仅读取 ptrid / modules 元数据，不加载 results。"""
+    db_path = Path(path)
+    conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+    try:
+        resolved_ptrid = _resolve_ptrid(conn, ptrid)
+        modules = _load_modules(conn, resolved_ptrid)
+        return {
+            "ptrid": resolved_ptrid,
+            "ptrids_available": _list_ptrids(conn),
+            "module_count": len(modules),
+            "modules": sorted(modules.values()),
+            "module_map": modules,
+        }
+    finally:
+        conn.close()

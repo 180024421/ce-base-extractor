@@ -3,16 +3,18 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Callable
 
 from ce_base_extractor.export.formatter import save_result
 from ce_base_extractor.filters.cross_validate import cross_validate_files
 from ce_base_extractor.filters.presets import get_preset
 from ce_base_extractor.filters.scorer import filter_and_rank
+from ce_base_extractor.filters.stream_rank import filter_and_rank_stream, module_stats_from_counts
 from ce_base_extractor.il2cpp.mapper import apply_il2cpp_hints, load_il2cpp_map
 from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
+from ce_base_extractor.parsers.chain_io import iter_file_chains
 from ce_base_extractor.parsers.ptr_parser import load_ptr
-from ce_base_extractor.parsers.sqlite_parser import load_sqlite
-from ce_base_extractor.stats.module_stats import compute_module_stats
+from ce_base_extractor.parsers.sqlite_parser import load_sqlite, load_sqlite_meta
 from ce_base_extractor.verify.live_probe import probe_chains
 
 
@@ -76,27 +78,41 @@ def _preferred_module_ids(modules: dict[int, str], preset_id: str) -> set[int] |
     return ids or None
 
 
+def _resolve_module_ids(input_path: Path, ptrid: int | None, cfg: ExtractConfig) -> set[int] | None:
+    if not cfg.sqlite_module_prefilter or not cfg.emulator_mode:
+        return None
+    meta = load_sqlite_meta(input_path, ptrid=ptrid or cfg.ptrid)
+    return _preferred_module_ids(meta.get("module_map", {}), cfg.preset)
+
+
 def _load_chains(
     input_path: Path,
     ptrid: int | None,
     cfg: ExtractConfig,
+    *,
+    on_progress: Callable[[int], None] | None = None,
 ) -> tuple[list[PointerChain], dict]:
     suffix = input_path.suffix.lower()
     if suffix in (".db", ".sqlite", ".sqlite3"):
-        module_ids = None
-        if cfg.sqlite_module_prefilter and cfg.emulator_mode:
-            import sqlite3
-
-            conn = sqlite3.connect(f"file:{input_path.as_posix()}?mode=ro", uri=True)
-            try:
-                from ce_base_extractor.parsers.sqlite_parser import _load_modules, _resolve_ptrid
-
-                resolved = _resolve_ptrid(conn, ptrid or cfg.ptrid)
-                modules = _load_modules(conn, resolved)
-                module_ids = _preferred_module_ids(modules, cfg.preset)
-            finally:
-                conn.close()
-        return load_sqlite(input_path, ptrid=ptrid or cfg.ptrid, module_ids=module_ids)
+        resolved_ptrid = ptrid or cfg.ptrid
+        module_ids = _resolve_module_ids(input_path, resolved_ptrid, cfg)
+        if cfg.stream_single_file:
+            meta = load_sqlite_meta(input_path, ptrid=resolved_ptrid)
+            if module_ids is None and cfg.sqlite_module_prefilter:
+                module_ids = _preferred_module_ids(meta.get("module_map", {}), cfg.preset)
+            it = iter_file_chains(input_path, ptrid=resolved_ptrid, module_ids=module_ids)
+            chains, total, mod_counts = filter_and_rank_stream(it, cfg, on_progress=on_progress)
+            return chains, {
+                "ptrid": meta.get("ptrid"),
+                "ptrids_available": meta.get("ptrids_available", []),
+                "module_count": meta.get("module_count", 0),
+                "modules": meta.get("modules", []),
+                "result_count": total,
+                "module_prefilter": sorted(module_ids) if module_ids else None,
+                "_module_counts": mod_counts,
+                "_streamed": True,
+            }
+        return load_sqlite(input_path, ptrid=resolved_ptrid, module_ids=module_ids)
     if suffix == ".ptr":
         return load_ptr(input_path)
     raise ValueError(f"不支持的文件类型: {suffix}，请使用 .sqlite / .db 或 .PTR")
@@ -107,6 +123,8 @@ def extract(
     config: ExtractConfig | None = None,
     config_path: str | Path | None = None,
     extra_files: list[str | Path] | None = None,
+    *,
+    on_progress: Callable[[int], None] | None = None,
 ) -> ExtractResult:
     cfg = config or load_config(config_path)
     input_path = Path(input_file)
@@ -115,23 +133,37 @@ def extract(
     ptrid: int | None = None
     modules_seen: list[str] = []
     live_probe_meta: list[dict] | None = None
+    module_counts: dict[str, int] | None = None
+    chains: list[PointerChain]
+    streamed = False
 
     if extra_files:
         all_files = [input_path, *[Path(f) for f in extra_files]]
         min_occ = max(cfg.cross_validate_min, 2)
+        module_ids = _resolve_module_ids(input_path, cfg.ptrid, cfg)
         chains, cross_meta = cross_validate_files(
             all_files,
             min_occurrences=min_occ,
             ptrid=cfg.ptrid,
             require_all=cfg.cross_validate_require_all,
+            module_ids=module_ids,
+            fuzzy=cfg.cross_validate_fuzzy,
+            fuzzy_last_offset_step=cfg.fuzzy_last_offset_step,
         )
         total_raw = int(cross_meta.get("stable_keys", len(chains)))
         modules_seen = sorted({c.module_name for c in chains})
         ptrid = cfg.ptrid
         source = ", ".join(str(p.name) for p in all_files)
     else:
-        chains, meta = _load_chains(input_path, cfg.ptrid, cfg)
-        total_raw = int(meta.get("result_count", len(chains)))
+        loaded, meta = _load_chains(input_path, cfg.ptrid, cfg, on_progress=on_progress)
+        streamed = bool(meta.get("_streamed"))
+        if streamed:
+            chains = loaded
+            total_raw = int(meta.get("result_count", len(chains)))
+            module_counts = meta.get("_module_counts")
+        else:
+            chains = loaded
+            total_raw = int(meta.get("result_count", len(chains)))
         modules_seen = list(meta.get("modules", []))
         ptrid = meta.get("ptrid")
         source = str(input_path)
@@ -140,25 +172,34 @@ def extract(
     if il2cpp_map:
         chains = apply_il2cpp_hints(chains, il2cpp_map)
 
-    ranked = filter_and_rank(chains, cfg)
+    if streamed:
+        ranked = chains
+    else:
+        ranked = filter_and_rank(chains, cfg)
 
     if cfg.live_probe and ranked:
-        ranked, probe_results = probe_chains(ranked, cfg)
+        ranked, probe_results = probe_chains(ranked, cfg, il2cpp_map=il2cpp_map or None)
         live_probe_meta = [
             {
                 "readable": r.readable,
                 "error": r.error,
                 "module": r.chain.module_name,
                 "offsets": list(r.chain.offsets),
+                "value_type": r.chain.value_type,
             }
             for r in probe_results
         ]
         ranked = ranked[: cfg.top_n]
 
-    stats = compute_module_stats(chains, cfg.emulator_mode)
+    if module_counts is not None:
+        stats = module_stats_from_counts(module_counts, cfg.emulator_mode)
+    else:
+        from ce_base_extractor.stats.module_stats import compute_module_stats
+
+        stats = compute_module_stats(ranked, cfg.emulator_mode)
 
     if not modules_seen:
-        modules_seen = sorted({c.module_name for c in chains})
+        modules_seen = sorted({c.module_name for c in ranked})
 
     return ExtractResult(
         chains=ranked,

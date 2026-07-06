@@ -80,14 +80,18 @@ def _parse_off(value: str | int | None) -> int:
 def _lookup_symbol(mapping: dict[int, str], chain: PointerChain) -> str:
     if chain.module_offset in mapping:
         return mapping[chain.module_offset]
-    if chain.offsets:
-        last = chain.offsets[-1]
-        if last in mapping:
-            return mapping[last]
+    for off in chain.offsets:
+        if off in mapping:
+            return mapping[off]
         for step in (0x8, 0x4):
-            bucket = last - (last % step)
+            bucket = off - (off % step)
             if bucket in mapping:
                 return mapping[bucket]
+    if len(chain.offsets) >= 2:
+        suffix = (chain.offsets[-2], chain.offsets[-1])
+        for off, sym in mapping.items():
+            if off == suffix[-1] or off == suffix[-1] - (suffix[-1] % 8):
+                return sym
     return ""
 
 

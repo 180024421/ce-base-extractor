@@ -22,7 +22,10 @@ def test_lua_export_contains_read_chain(tmp_path):
 
 def test_profile_versioning(tmp_path):
     store = ProfileStore(tmp_path)
-    p1 = GameProfile(game_name="demo", chains=[{"field_name": "gold", "module": "m", "module_offset": 1, "offsets": [2]}])
+    p1 = GameProfile(
+        game_name="demo",
+        chains=[{"field_name": "gold", "module": "m", "module_offset": 1, "offsets": [2]}],
+    )
     store.save(p1)
     assert store.list_versions("demo")
     p2 = GameProfile(game_name="demo", chains=[])
@@ -33,11 +36,11 @@ def test_profile_versioning(tmp_path):
 def test_compare_profiles_detects_changes():
     old = GameProfile(
         game_name="g",
-        chains=[{"field_name": "gold", "module": "m", "module_offset": 1, "offsets": [2]}],
+        chains=[{"field_name": "gold", "module": "m", "module_offset": 1, "offsets": [2, 3]}],
     )
     new = GameProfile(
         game_name="g",
-        chains=[{"field_name": "hp", "module": "m", "module_offset": 1, "offsets": [4]}],
+        chains=[{"field_name": "hp", "module": "m", "module_offset": 0x9999, "offsets": [4, 5]}],
     )
     report = compare_profiles(old, new)
     assert "gold" in report.removed

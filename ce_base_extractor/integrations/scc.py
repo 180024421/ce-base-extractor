@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ce_base_extractor.models import PointerChain
+from ce_base_extractor.profiles.store import ProfileStore, _snapshot_decode
+from ce_base_extractor.verify.restart_verify import verify_restart_stability
+
 
 def load_bases(path: str | Path) -> dict[str, Any]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -30,6 +34,10 @@ def list_chain_names(path: str | Path) -> list[str]:
     return [c["name"] for c in load_bases(path).get("chains", [])]
 
 
+def snapshots_from_bases(path: str | Path) -> dict[str, dict]:
+    return load_bases(path).get("snapshots", {})
+
+
 @dataclass
 class ScheduledRecheckResult:
     profile: str
@@ -49,15 +57,13 @@ def scheduled_recheck_profile(
     preset_id: str = "ldplayer",
     pointer_size: int = 8,
     pid: int | None = None,
+    require_value_match: bool = False,
 ) -> ScheduledRecheckResult:
     """SCC 定时复检：加载 profile/SCC 并执行重启可读性验证。"""
-    from ce_base_extractor.profiles.store import ProfileStore
-    from ce_base_extractor.verify.restart_verify import verify_restart_stability
+    before_values: dict[str, int | float | bytes] = {}
 
     if scc_path:
         bases = load_bases(scc_path)
-        from ce_base_extractor.models import PointerChain
-
         chains = [
             PointerChain(
                 module_name=c["module"],
@@ -65,23 +71,29 @@ def scheduled_recheck_profile(
                 offsets=tuple(int(o) for o in c["offsets"]),
                 field_name=c.get("name", ""),
                 value_type=c.get("type", "int32"),
+                verified=bool(c.get("verified", False)),
             )
             for c in bases.get("chains", [])
         ]
         preset_id = bases.get("preset", preset_id)
+        for name, entry in bases.get("snapshots", {}).items():
+            if isinstance(entry, dict) and "value" in entry:
+                before_values[name] = _snapshot_decode(entry["value"])  # type: ignore[assignment]
     else:
         profile = ProfileStore().load(profile_name)
         chains = profile.to_result().chains
         preset_id = profile.preset
         pointer_size = profile.pointer_size
         pid = pid or profile.target_pid
+        before_values = profile.snapshot_values()
 
     results = verify_restart_stability(
         chains,
-        {},
+        before_values,
         preset_id=preset_id,
         pointer_size=pointer_size,
         pid=pid,
+        require_value_match=require_value_match,
     )
     details = []
     for i, r in enumerate(results, 1):
@@ -91,6 +103,8 @@ def scheduled_recheck_profile(
                 "stable": r.stable,
                 "error": r.error,
                 "value_unchanged": r.value_unchanged,
+                "before": r.before,
+                "after": r.after,
             }
         )
     stable = sum(1 for r in results if r.stable)

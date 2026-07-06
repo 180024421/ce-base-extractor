@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.1 (2026-07-06)
+
+### 准确率
+- 交叉验证 fuzzy 与 filter 策略对齐
+- Profile 快照持久化，CLI verify / scc-recheck 可用
+- Live probe 类型推断（int32 vs float）
+- `probe_drop_unreadable` 默认 true
+- Profile migrate fuzzy 匹配
+- 交叉验证 SQLite 模块预过滤
+- `ProcessMemory` 模块缓存 + 精确匹配 + PID 校验
+
+### 性能
+- 单文件流式 top-N（`stream_single_file`）
+- 模块统计基于流式计数
+
+### UX / 生态
+- GUI 高级选项、增量交叉监视、版本对比/复检按钮
+- SCC v2（snapshots、probe 元数据）
+- Lua 导出 ASS 友好模板
+- Frida guest 可配置包名
+- 大文件扫描进度
+
+### 工程
+- `ExtractConfig.validate()`、公共 `chain_io.iter_file_chains`
+- CI：ruff format + pytest-cov
+- 新增 test_v051_features 等
+
 ## 0.5.0 (2026-07-03)
 
 ### 准确率

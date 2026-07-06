@@ -9,14 +9,23 @@ from ce_base_extractor.filters.presets import get_preset
 from ce_base_extractor.models import ExtractResult
 
 
-def result_to_scc_json(result: ExtractResult, preset_id: str = "ldplayer") -> str:
+def result_to_scc_json(
+    result: ExtractResult,
+    preset_id: str = "ldplayer",
+    *,
+    snapshots: dict[str, dict] | None = None,
+    android_package: str = "",
+) -> str:
     preset = get_preset(preset_id)
     payload = {
-        "format": "ce-base-extractor/scc-v1",
+        "format": "ce-base-extractor/scc-v2",
         "game": preset_id,
         "preset": preset_id,
         "process_names": list(preset.process_names) if preset else ["dnplayer.exe"],
+        "android_package": android_package,
         "source": result.source_file,
+        "live_probe_meta": result.live_probe_meta,
+        "snapshots": snapshots or {},
         "chains": [
             {
                 "name": c.export_name(i + 1),
@@ -40,7 +49,18 @@ def save_scc_json(
     result: ExtractResult,
     output: str | Path,
     preset_id: str = "ldplayer",
+    *,
+    snapshots: dict[str, dict] | None = None,
+    android_package: str = "",
 ) -> Path:
     path = Path(output)
-    path.write_text(result_to_scc_json(result, preset_id), encoding="utf-8")
+    path.write_text(
+        result_to_scc_json(
+            result,
+            preset_id,
+            snapshots=snapshots,
+            android_package=android_package,
+        ),
+        encoding="utf-8",
+    )
     return path

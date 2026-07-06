@@ -14,9 +14,11 @@ class FolderWatcher:
         folder: str | Path,
         on_new_file: Callable[[Path], None],
         interval: float = 2.0,
+        on_error: Callable[[Path, Exception], None] | None = None,
     ) -> None:
         self.folder = Path(folder)
         self.on_new_file = on_new_file
+        self.on_error = on_error
         self.interval = interval
         self._seen: set[str] = set()
         self._stop = threading.Event()
@@ -25,10 +27,9 @@ class FolderWatcher:
     def _scan_existing(self) -> None:
         if not self.folder.is_dir():
             return
-        for p in self.folder.glob("*.sqlite"):
-            self._seen.add(str(p.resolve()))
-        for p in self.folder.glob("*.db"):
-            self._seen.add(str(p.resolve()))
+        for pattern in ("*.sqlite", "*.db", "*.sqlite3"):
+            for p in self.folder.glob(pattern):
+                self._seen.add(str(p.resolve()))
 
     def start(self) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -52,6 +53,7 @@ class FolderWatcher:
                             self._seen.add(key)
                             try:
                                 self.on_new_file(path)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                if self.on_error:
+                                    self.on_error(path, exc)
             time.sleep(self.interval)

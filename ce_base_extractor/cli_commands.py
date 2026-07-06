@@ -117,14 +117,19 @@ def run_diff(args) -> int:
 
 def run_verify(args) -> int:
     store = ProfileStore()
-    profile = store.load(args.profile)
+    try:
+        profile = store.load(args.profile)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     chains = profile.to_result().chains
     if not chains:
         print("配置中没有指针链", file=sys.stderr)
         return 1
+    before = profile.snapshot_values()
     results = verify_restart_stability(
         chains,
-        {},
+        before,
         preset_id=profile.preset,
         pointer_size=profile.pointer_size,
         pid=args.pid or profile.target_pid,
@@ -154,7 +159,11 @@ def run_watch(args) -> int:
     incremental = IncrementalCrossValidator(
         min_occurrences=max(load_config(args.config).cross_validate_min, 2),
         ptrid=args.ptrid,
+        fuzzy=load_config(args.config).cross_validate_fuzzy,
     )
+
+    def on_error(path: Path, exc: Exception) -> None:
+        print(f"  [错误] {path.name}: {exc}", file=sys.stderr)
 
     def on_new(path: Path) -> None:
         print(f"[新文件] {path.name}")
@@ -165,8 +174,7 @@ def run_watch(args) -> int:
                 if getattr(args, "incremental_cross", False):
                     info = incremental.add_file(path)
                     print(
-                        f"  增量交叉: +{info['new_unique_keys']} 键, "
-                        f"稳定 {info['stable_keys']} 条"
+                        f"  增量交叉: +{info['new_unique_keys']} 键, 稳定 {info['stable_keys']} 条"
                     )
                     stable = incremental.stable_chains()
                     if stable:
@@ -187,7 +195,7 @@ def run_watch(args) -> int:
             except Exception as exc:
                 print(f"  提取失败: {exc}", file=sys.stderr)
 
-    watcher = FolderWatcher(folder, on_new, interval=args.interval)
+    watcher = FolderWatcher(folder, on_new, interval=args.interval, on_error=on_error)
     watcher.start()
     try:
         while True:
@@ -253,6 +261,7 @@ def run_scc_recheck(args) -> int:
         args.profile,
         scc_path=args.scc,
         pid=args.pid,
+        require_value_match=getattr(args, "require_value_match", False),
     )
     for item in result.details:
         status = "稳定" if item["stable"] else f"失败: {item.get('error', '')}"

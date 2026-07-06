@@ -97,6 +97,7 @@ class ProcessMemory:
         self._handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
         if not self._handle:
             _raise_last_error(f"无法打开进程 PID={pid}")
+        self._module_cache: dict[str, int] | None = None
 
     def close(self) -> None:
         if self._handle:
@@ -153,11 +154,19 @@ class ProcessMemory:
             for m in matches:
                 if m.pid == pid:
                     return cls(m.pid, m.name)
-            return cls(pid, "unknown")
+            known = [f"{m.pid}({m.name})" for m in matches]
+            raise ProcessLookupError(
+                f"PID {pid} 不在预设进程 {list(process_names)} 中；当前匹配: {known or '无'}"
+            )
         found_pid, name = cls.find_pid(process_names)
         return cls(found_pid, name)
 
-    def list_modules(self) -> dict[str, int]:
+    def invalidate_module_cache(self) -> None:
+        self._module_cache = None
+
+    def list_modules(self, refresh: bool = False) -> dict[str, int]:
+        if self._module_cache is not None and not refresh:
+            return self._module_cache
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, self.pid)
         if snap == INVALID_HANDLE_VALUE:
             _raise_last_error("模块枚举失败")
@@ -176,17 +185,28 @@ class ProcessMemory:
                     break
         finally:
             kernel32.CloseHandle(snap)
+        self._module_cache = modules
         return modules
 
     def get_module_base(self, module_name: str) -> int:
         modules = self.list_modules()
         key = module_name.lower()
-        if key not in modules:
-            for name, base in modules.items():
-                if key in name or name in key:
-                    return base
-            raise KeyError(f"模块未找到: {module_name}")
-        return modules[key]
+        if key in modules:
+            return modules[key]
+        basename = key.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if basename in modules:
+            return modules[basename]
+        candidates: list[tuple[str, int]] = []
+        for name, base in modules.items():
+            if name == basename or name.endswith(f"/{basename}") or name.endswith(f"\\{basename}"):
+                return base
+            if name.endswith(key) or key.endswith(name):
+                candidates.append((name, base))
+        if candidates:
+            candidates.sort(key=lambda x: (len(x[0]), x[0]))
+            return candidates[0][1]
+        sample = ", ".join(sorted(modules.keys())[:6])
+        raise KeyError(f"模块未找到: {module_name}；示例: {sample}")
 
     def read_bytes(self, address: int, size: int) -> bytes:
         buf = ctypes.create_string_buffer(size)

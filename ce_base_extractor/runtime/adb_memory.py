@@ -25,7 +25,9 @@ class AdbMemoryReader:
         if self.serial:
             cmd.extend(["-s", self.serial])
         cmd.extend(args)
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore"
+        )
         return (proc.stdout or proc.stderr or "").strip()
 
     def list_processes(self, filter_sub: str = "") -> list[AdbProcess]:

@@ -50,18 +50,35 @@ class ExtractConfig:
     pointer_size: int = 8
     target_pid: int | None = None
     il2cpp_map_path: str | None = None
+    android_package: str = ""
     live_probe: bool = True
     probe_top_n: int = 10
-    probe_drop_unreadable: bool = False
+    probe_drop_unreadable: bool = True
     fuzzy_dedupe: bool = True
     fuzzy_last_offset_step: int = 0x8
     cross_validate_require_all: bool = False
+    cross_validate_fuzzy: bool = True
     sqlite_module_prefilter: bool = True
+    stream_single_file: bool = True
+
+    def validate(self) -> ExtractConfig:
+        if self.top_n < 1:
+            raise ValueError("top_n 必须 >= 1")
+        if self.max_depth < 1:
+            raise ValueError("max_depth 必须 >= 1")
+        if self.pointer_size not in (4, 8):
+            raise ValueError("pointer_size 必须为 4 或 8")
+        if self.probe_top_n < 0:
+            raise ValueError("probe_top_n 不能为负")
+        if self.fuzzy_last_offset_step < 0:
+            raise ValueError("fuzzy_last_offset_step 不能为负")
+        return self
 
     @classmethod
     def from_dict(cls, data: dict) -> ExtractConfig:
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        cfg = cls(**{k: v for k, v in data.items() if k in known})
+        return cfg.validate()
 
 
 @dataclass

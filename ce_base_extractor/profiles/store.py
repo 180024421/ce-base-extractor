@@ -14,13 +14,27 @@ def _profiles_dir() -> Path:
     return p
 
 
+def _snapshot_encode(value: object) -> object:
+    if isinstance(value, bytes):
+        return {"__type__": "bytes", "hex": value.hex()}
+    return value
+
+
+def _snapshot_decode(value: object) -> object:
+    if isinstance(value, dict) and value.get("__type__") == "bytes":
+        return bytes.fromhex(str(value.get("hex", "")))
+    return value
+
+
 @dataclass
 class GameProfile:
     game_name: str
     preset: str = "ldplayer"
     pointer_size: int = 8
     target_pid: int | None = None
+    android_package: str = ""
     chains: list[dict] = field(default_factory=list)
+    snapshots: dict[str, dict] = field(default_factory=dict)
     updated_at: str = ""
     version: int = 1
 
@@ -32,6 +46,8 @@ class GameProfile:
         preset: str = "ldplayer",
         pointer_size: int = 8,
         target_pid: int | None = None,
+        android_package: str = "",
+        snapshots: dict[str, dict] | None = None,
     ) -> GameProfile:
         chains = []
         for i, c in enumerate(result.chains, 1):
@@ -52,7 +68,9 @@ class GameProfile:
             preset=preset,
             pointer_size=pointer_size,
             target_pid=target_pid,
+            android_package=android_package,
             chains=chains,
+            snapshots=dict(snapshots or {}),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -79,6 +97,18 @@ class GameProfile:
             source_file=source,
         )
 
+    def snapshot_values(self) -> dict[str, int | float | bytes]:
+        out: dict[str, int | float | bytes] = {}
+        for name, entry in self.snapshots.items():
+            if isinstance(entry, dict) and "value" in entry:
+                out[name] = _snapshot_decode(entry["value"])  # type: ignore[assignment]
+        return out
+
+    def record_snapshots(self, values: dict[str, object]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        for name, val in values.items():
+            self.snapshots[name] = {"value": _snapshot_encode(val), "captured_at": now}
+
 
 class ProfileStore:
     def __init__(self, directory: Path | None = None) -> None:
@@ -102,12 +132,13 @@ class ProfileStore:
         return sorted((p.stem for p in vdir.glob("*.json")), reverse=True)
 
     def save(self, profile: GameProfile) -> Path:
-        existing = None
         path = self._game_path(profile.game_name)
         if path.is_file():
             try:
                 existing = json.loads(path.read_text(encoding="utf-8"))
                 profile.version = int(existing.get("version", 1)) + 1
+                if not profile.snapshots and existing.get("snapshots"):
+                    profile.snapshots = existing["snapshots"]
             except (json.JSONDecodeError, TypeError):
                 profile.version = 2
         else:
@@ -122,11 +153,19 @@ class ProfileStore:
         return path
 
     def load(self, game_name: str) -> GameProfile:
-        data = json.loads(self._game_path(game_name).read_text(encoding="utf-8"))
+        path = self._game_path(game_name)
+        if not path.is_file():
+            raise FileNotFoundError(f"游戏配置不存在: {game_name}")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"配置 JSON 损坏: {path}") from exc
         return GameProfile(**data)
 
     def load_version(self, game_name: str, version_id: str) -> GameProfile:
         path = self.directory / game_name / "versions" / f"{version_id}.json"
+        if not path.is_file():
+            raise FileNotFoundError(f"历史版本不存在: {game_name}/{version_id}")
         data = json.loads(path.read_text(encoding="utf-8"))
         return GameProfile(**data)
 

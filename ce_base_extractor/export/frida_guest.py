@@ -10,7 +10,7 @@ from ce_base_extractor.models import ExtractResult
 def result_to_frida_guest(result: ExtractResult, *, package: str = "com.example.game") -> str:
     lines = [
         "// ce-base-extractor Frida guest 骨架",
-        f"// adb shell pm list packages | findstr game",
+        "// adb shell pm list packages | findstr game",
         f"// frida -U -f {package} -l this_file.js",
         "",
         "function readChain(moduleName, moduleOffset, offsets, type) {",
@@ -32,9 +32,7 @@ def result_to_frida_guest(result: ExtractResult, *, package: str = "com.example.
         name = c.export_name(i)
         offs = ", ".join(f"0x{o:X}" for o in c.offsets)
         vtype = c.value_type or "int32"
-        lines.append(
-            f"// {name}: {c.module_name}+0x{c.module_offset:X} [{offs}]"
-        )
+        lines.append(f"// {name}: {c.module_name}+0x{c.module_offset:X} [{offs}]")
         lines.append(
             f"const {name} = readChain('{c.module_name}', 0x{c.module_offset:X}, "
             f"[{offs}], '{vtype}');"

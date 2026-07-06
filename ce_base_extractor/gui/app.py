@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -9,23 +10,26 @@ from ce_base_extractor.compare.sqlite_diff import diff_sqlite_files, diff_sqlite
 from ce_base_extractor.export.batch_export import export_all
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import format_ce_table, to_json, to_text
-from ce_base_extractor.export.python_script import save_python_script
 from ce_base_extractor.export.lua_script import save_lua_script
+from ce_base_extractor.export.python_script import save_python_script
 from ce_base_extractor.export.scc_export import save_scc_json
 from ce_base_extractor.filters.presets import PRESETS, get_preset
 from ce_base_extractor.gui.chain_dialog import open_chain_editor
 from ce_base_extractor.gui.process_picker import pick_process
 from ce_base_extractor.gui.wizard import show_first_run_wizard
 from ce_base_extractor.history.store import HistoryStore
+from ce_base_extractor.integrations.scc import scheduled_recheck_profile
 from ce_base_extractor.io.scc_import import import_scc_to_result
 from ce_base_extractor.models import ExtractConfig, ExtractResult, PointerChain
 from ce_base_extractor.parsers.sqlite_parser import list_ptrids
 from ce_base_extractor.pipeline import extract, load_config, save_config, wizard_completed
+from ce_base_extractor.profiles.migrate import compare_profiles
 from ce_base_extractor.profiles.store import GameProfile, ProfileStore
 from ce_base_extractor.runtime.win_memory import ProcessMemory, read_chain_value
 from ce_base_extractor.suggest.field_names import suggest_field_names
 from ce_base_extractor.verify.restart_verify import verify_restart_stability
 from ce_base_extractor.watch.folder_watcher import FolderWatcher
+from ce_base_extractor.watch.incremental_cross import IncrementalCrossValidator
 
 try:
     import windnd
@@ -59,6 +63,8 @@ class App(tk.Tk):
         self._monitor_job: str | None = None
         self._monitor_prev: dict[str, object] = {}
         self._extract_busy = False
+        self._incremental_cross: IncrementalCrossValidator | None = None
+        self._monitor_mem: ProcessMemory | None = None
 
         self._build_ui()
         if _HAS_WINDND:
@@ -188,6 +194,26 @@ class App(tk.Tk):
             row=2, column=6, padx=(12, 0), pady=(6, 0), sticky=tk.W
         )
 
+        adv = ttk.LabelFrame(self._tab_extract, text="高级选项", padding=8)
+        adv.pack(fill=tk.X, pady=4)
+        self.live_probe_var = tk.BooleanVar(value=self._config.live_probe)
+        self.probe_drop_var = tk.BooleanVar(value=self._config.probe_drop_unreadable)
+        self.fuzzy_var = tk.BooleanVar(value=self._config.fuzzy_dedupe)
+        self.cross_all_var = tk.BooleanVar(value=self._config.cross_validate_require_all)
+        self.stream_var = tk.BooleanVar(value=self._config.stream_single_file)
+        self.android_pkg_var = tk.StringVar(value=getattr(self._config, "android_package", ""))
+        ttk.Checkbutton(adv, text="在线探针", variable=self.live_probe_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(adv, text="剔除不可读", variable=self.probe_drop_var).pack(
+            side=tk.LEFT, padx=8
+        )
+        ttk.Checkbutton(adv, text="模糊去重", variable=self.fuzzy_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(adv, text="交叉需全命中", variable=self.cross_all_var).pack(
+            side=tk.LEFT, padx=8
+        )
+        ttk.Checkbutton(adv, text="流式读取", variable=self.stream_var).pack(side=tk.LEFT)
+        ttk.Label(adv, text="Android包名").pack(side=tk.LEFT, padx=(12, 4))
+        ttk.Entry(adv, textvariable=self.android_pkg_var, width=28).pack(side=tk.LEFT)
+
         paned = ttk.Panedwindow(self._tab_extract, orient=tk.VERTICAL)
         paned.pack(fill=tk.BOTH, expand=True, pady=6)
 
@@ -316,6 +342,8 @@ class App(tk.Tk):
         row.pack(fill=tk.X, pady=4)
         ttk.Button(row, text="保存当前为游戏配置", command=self._save_profile).pack(side=tk.LEFT)
         ttk.Button(row, text="加载配置", command=self._load_profile).pack(side=tk.LEFT, padx=6)
+        ttk.Button(row, text="立即复检", command=self._profile_recheck).pack(side=tk.LEFT, padx=6)
+        ttk.Button(row, text="版本对比", command=self._profile_migrate).pack(side=tk.LEFT, padx=6)
         ttk.Button(row, text="删除配置", command=self._delete_profile).pack(side=tk.LEFT)
         ttk.Button(row, text="刷新列表", command=self._refresh_profiles).pack(side=tk.LEFT, padx=6)
 
@@ -365,12 +393,18 @@ class App(tk.Tk):
         )
 
         self.watch_var = tk.BooleanVar(value=False)
+        self.watch_incremental_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             footer,
             text=f"监视导出目录 ({WATCH_DIR.name})",
             variable=self.watch_var,
             command=self._toggle_watch,
         ).pack(side=tk.LEFT, padx=8)
+        ttk.Checkbutton(
+            footer,
+            text="增量交叉",
+            variable=self.watch_incremental_var,
+        ).pack(side=tk.LEFT)
 
         self.status_var = tk.StringVar(value="就绪 · 默认雷电模拟器")
         ttk.Label(footer, textvariable=self.status_var).pack(side=tk.RIGHT)
@@ -411,10 +445,18 @@ class App(tk.Tk):
             module_blacklist=self._config.module_blacklist,
             required_end_offset=self._parse_end_offset(),
             cross_validate_min=self._config.cross_validate_min,
+            cross_validate_require_all=bool(self.cross_all_var.get()),
+            cross_validate_fuzzy=bool(self.fuzzy_var.get()),
             game_name=self.game_name_var.get().strip() or "game",
             pointer_size=int(self.pointer_size_var.get()),
             target_pid=self._target_pid,
             il2cpp_map_path=self.il2cpp_var.get().strip() or None,
+            android_package=self.android_pkg_var.get().strip(),
+            live_probe=bool(self.live_probe_var.get()),
+            probe_drop_unreadable=bool(self.probe_drop_var.get()),
+            fuzzy_dedupe=bool(self.fuzzy_var.get()),
+            stream_single_file=bool(self.stream_var.get()),
+            sqlite_module_prefilter=self._config.sqlite_module_prefilter,
         )
 
     def _on_drop(self, files: list[bytes]) -> None:
@@ -501,25 +543,44 @@ class App(tk.Tk):
         if self._extract_busy:
             return
         self._extract_async(
-            lambda: extract(self._current_file, config=self._current_config()),
+            lambda on_progress=None: extract(
+                self._current_file,
+                config=self._current_config(),
+                on_progress=on_progress,
+            ),
             "正在提取基址…",
+            use_progress=True,
         )
 
-    def _extract_async(self, fn, title: str) -> None:
+    def _extract_async(self, fn, title: str, *, use_progress: bool = False) -> None:
         self._extract_busy = True
         self.status_var.set(title)
         win = tk.Toplevel(self)
         win.title(title)
-        win.geometry("320x80")
+        win.geometry("320x90")
         win.transient(self)
         ttk.Label(win, text=title).pack(pady=(12, 4))
-        bar = ttk.Progressbar(win, mode="indeterminate")
+        prog_label = ttk.Label(win, text="")
+        prog_label.pack()
+        bar = ttk.Progressbar(win, mode="indeterminate" if not use_progress else "determinate")
         bar.pack(fill=tk.X, padx=16, pady=4)
-        bar.start(10)
+        if use_progress:
+            bar.configure(maximum=100, value=0)
+        else:
+            bar.start(10)
 
         def work() -> None:
             try:
-                result = fn()
+                if use_progress:
+                    last = [0]
+
+                    def on_progress(n: int) -> None:
+                        last[0] = n
+                        self.after(0, lambda: prog_label.config(text=f"已扫描 {n} 行"))
+
+                    result = fn(on_progress)
+                else:
+                    result = fn()
                 self.after(0, lambda: self._on_extract_done(result, win))
             except Exception as exc:
                 self.after(0, lambda e=exc: self._on_extract_error(e, win))
@@ -704,6 +765,14 @@ class App(tk.Tk):
             messagebox.showinfo(
                 "记录读数", f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」"
             )
+            game = self.game_name_var.get().strip()
+            if game:
+                try:
+                    profile = self._profiles.load(game)
+                    profile.record_snapshots(self._before_verify)
+                    self._profiles.save(profile)
+                except FileNotFoundError:
+                    pass
         except Exception as exc:
             messagebox.showerror("失败", str(exc))
 
@@ -1027,6 +1096,9 @@ class App(tk.Tk):
         if self._monitor_job:
             self.after_cancel(self._monitor_job)
             self._monitor_job = None
+        if self._monitor_mem:
+            self._monitor_mem.close()
+            self._monitor_mem = None
 
     def _monitor_tick(self) -> None:
         if not self._monitor_running or not self._result:
@@ -1036,30 +1108,34 @@ class App(tk.Tk):
         try:
             preset = get_preset(self.preset_var.get())
             names = list(preset.process_names) if preset else ["dnplayer.exe"]
-            mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            if self._monitor_mem is None:
+                self._monitor_mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            mem = self._monitor_mem
             ps = int(self.pointer_size_var.get())
             now = datetime.now().strftime("%H:%M:%S")
-            with mem:
-                for item in self.monitor_tree.get_children():
-                    self.monitor_tree.delete(item)
-                for i, chain in enumerate(self._result.chains, 1):
-                    name = chain.export_name(i)
-                    try:
-                        val = read_chain_value(mem, chain, ps)
-                        prev = self._monitor_prev.get(name)
-                        tag = "same" if prev == val else "changed"
-                        if prev is None:
-                            tag = ""
-                        self._monitor_prev[name] = val
-                        self.monitor_tree.insert(
-                            "", tk.END, values=(name, val, chain.value_type, now), tags=(tag,)
-                        )
-                    except Exception as exc:
-                        self.monitor_tree.insert(
-                            "", tk.END, values=(name, f"ERR: {exc}", chain.value_type, now)
-                        )
+            for item in self.monitor_tree.get_children():
+                self.monitor_tree.delete(item)
+            for i, chain in enumerate(self._result.chains, 1):
+                name = chain.export_name(i)
+                try:
+                    val = read_chain_value(mem, chain, ps)
+                    prev = self._monitor_prev.get(name)
+                    tag = "same" if prev == val else "changed"
+                    if prev is None:
+                        tag = ""
+                    self._monitor_prev[name] = val
+                    self.monitor_tree.insert(
+                        "", tk.END, values=(name, val, chain.value_type, now), tags=(tag,)
+                    )
+                except Exception as exc:
+                    self.monitor_tree.insert(
+                        "", tk.END, values=(name, f"ERR: {exc}", chain.value_type, now)
+                    )
         except Exception as exc:
             self.status_var.set(f"监控错误: {exc}")
+            if self._monitor_mem:
+                self._monitor_mem.close()
+                self._monitor_mem = None
 
         interval = max(1, int(self.monitor_interval_var.get())) * 1000
         self._monitor_job = self.after(interval, self._monitor_tick)
@@ -1080,7 +1156,10 @@ class App(tk.Tk):
             preset=self.preset_var.get(),
             pointer_size=int(self.pointer_size_var.get()),
             target_pid=self._target_pid,
+            android_package=self.android_pkg_var.get().strip(),
         )
+        if self._before_verify:
+            profile.record_snapshots(self._before_verify)
         path = self._profiles.save(profile)
         self._refresh_profiles()
         self.profile_var.set(game)
@@ -1097,12 +1176,52 @@ class App(tk.Tk):
             self.pointer_size_var.set(str(profile.pointer_size))
             self._target_pid = profile.target_pid
             result = profile.to_result()
+            self._before_verify = profile.snapshot_values()
             self._populate_result(result)
             self.profile_info.delete("1.0", tk.END)
             self.profile_info.insert(tk.END, f"已加载 {game}\n链数: {len(result.chains)}\n")
             self.status_var.set(f"已加载游戏配置: {game}")
         except Exception as exc:
             messagebox.showerror("加载失败", str(exc))
+
+    def _profile_recheck(self) -> None:
+        game = self.profile_var.get() or self.game_name_var.get().strip()
+        if not game:
+            messagebox.showwarning("提示", "请选择或填写游戏名")
+            return
+        try:
+            result = scheduled_recheck_profile(game, pid=self._target_pid)
+            lines = [
+                f"{d['name']}: {'稳定' if d['stable'] else d.get('error', '不稳定')}"
+                for d in result.details
+            ]
+            messagebox.showinfo(
+                "复检结果", "\n".join(lines[:15]) + f"\n\n稳定 {result.stable}/{result.total}"
+            )
+        except Exception as exc:
+            messagebox.showerror("复检失败", str(exc))
+
+    def _profile_migrate(self) -> None:
+        game = self.profile_var.get()
+        if not game:
+            messagebox.showwarning("提示", "请选择游戏配置")
+            return
+        path = filedialog.askopenfilename(filetypes=[("SQLite", "*.sqlite *.db")])
+        if not path:
+            return
+        try:
+            old = self._profiles.load(game)
+            cfg = self._current_config()
+            cfg.game_name = game
+            cfg.live_probe = False
+            new_result = extract(path, config=cfg)
+            new = GameProfile.from_result(new_result, game, preset=old.preset)
+            report = compare_profiles(old, new)
+            msg = json.dumps(report.to_dict(), ensure_ascii=False, indent=2)
+            self.profile_info.delete("1.0", tk.END)
+            self.profile_info.insert(tk.END, msg)
+        except Exception as exc:
+            messagebox.showerror("对比失败", str(exc))
 
     def _delete_profile(self) -> None:
         game = self.profile_var.get()
@@ -1121,25 +1240,57 @@ class App(tk.Tk):
     def _toggle_watch(self) -> None:
         if self.watch_var.get():
             WATCH_DIR.mkdir(parents=True, exist_ok=True)
+            cfg = self._current_config()
+            if self.watch_incremental_var.get():
+                self._incremental_cross = IncrementalCrossValidator(
+                    min_occurrences=max(cfg.cross_validate_min, 2),
+                    ptrid=cfg.ptrid,
+                    fuzzy=cfg.cross_validate_fuzzy,
+                )
 
             def on_new(path: Path) -> None:
                 self.after(0, lambda: self._on_watch_file(path))
 
-            self._watcher = FolderWatcher(WATCH_DIR, on_new)
+            def on_error(path: Path, exc: Exception) -> None:
+                self.after(0, lambda: self.status_var.set(f"监视失败 {path.name}: {exc}"))
+
+            self._watcher = FolderWatcher(WATCH_DIR, on_new, on_error=on_error)
             self._watcher.start()
             self.status_var.set(f"正在监视: {WATCH_DIR}")
         else:
             if self._watcher:
                 self._watcher.stop()
                 self._watcher = None
+            self._incremental_cross = None
             self.status_var.set("已停止监视")
 
     def _on_watch_file(self, path: Path) -> None:
         self._set_file(path)
         try:
-            result = extract(path, config=self._current_config())
-            self._populate_result(result)
-            self.status_var.set(f"自动提取: {path.name}")
+            cfg = self._current_config()
+            if self.watch_incremental_var.get() and self._incremental_cross:
+                info = self._incremental_cross.add_file(path)
+                stable = self._incremental_cross.stable_chains()
+                if stable:
+                    from ce_base_extractor.filters.scorer import filter_and_rank
+
+                    ranked = filter_and_rank(stable, cfg)
+                    result = ExtractResult(
+                        chains=ranked,
+                        total_raw=len(stable),
+                        total_after_filter=len(ranked),
+                        modules_seen=sorted({c.module_name for c in stable}),
+                        source_file=str(path),
+                        cross_validate_meta=self._incremental_cross.meta(),
+                    )
+                    self._populate_result(result)
+                self.status_var.set(
+                    f"增量交叉 +{info['new_unique_keys']} 键, 稳定 {info['stable_keys']} 条"
+                )
+            else:
+                result = extract(path, config=cfg)
+                self._populate_result(result)
+                self.status_var.set(f"自动提取: {path.name}")
         except Exception as exc:
             self.status_var.set(f"自动提取失败: {exc}")
 
