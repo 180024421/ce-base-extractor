@@ -85,6 +85,8 @@ class CoreMixin:
     def _set_file(self, path: Path) -> None:
         self._current_file = path
         self.file_var.set(str(path))
+        if hasattr(self, "_file_card"):
+            self._file_card.set_active(True)
         try:
             ids = list_ptrids(path) if path.suffix.lower() in (".sqlite", ".db", ".sqlite3") else []
             if ids:

@@ -4,6 +4,7 @@ import tkinter as tk
 
 from ce_base_extractor.gui.app_imports import HAS_WINDND, load_config, wizard_completed
 from ce_base_extractor.gui.mixins import AuxMixin, CoreMixin, CrossMixin, ExtractMixin, ShellMixin
+from ce_base_extractor.gui.theme import THEME, apply_theme
 from ce_base_extractor.gui.wizard import show_first_run_wizard
 from ce_base_extractor.history.store import HistoryStore
 from ce_base_extractor.profiles.store import ProfileStore
@@ -25,9 +26,12 @@ class App(
 ):
     def __init__(self) -> None:
         super().__init__()
-        self.title("CE 基址提取器 · 雷电模拟器")
-        self.geometry("1080x720")
-        self.minsize(900, 600)
+        self.title("CE 基址提取器")
+        self.geometry("1140x760")
+        self.minsize(960, 640)
+
+        apply_theme(self)
+        self.configure(bg=THEME["bg"])
 
         self._config = load_config()
         self._current_file = None

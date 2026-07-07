@@ -35,38 +35,18 @@ def diff_sqlite_files(
     *,
     fuzzy: bool = True,
     fuzzy_last_offset_step: int = 0x8,
+    sqlite_threshold: int = DEFAULT_SQLITE_THRESHOLD,
+    force_sqlite_backend: bool = False,
 ) -> dict:
-    set_a = set(
-        _keys_from_file(
-            file_a,
-            ptrid,
-            fuzzy=fuzzy,
-            fuzzy_last_offset_step=fuzzy_last_offset_step,
-        ).keys()
+    """两份 SQLite 对比（ChainKeyCounter，与 N 文件版一致，避免大文件 OOM）。"""
+    return diff_sqlite_many(
+        [file_a, file_b],
+        ptrid=ptrid,
+        fuzzy=fuzzy,
+        fuzzy_last_offset_step=fuzzy_last_offset_step,
+        sqlite_threshold=sqlite_threshold,
+        force_sqlite_backend=force_sqlite_backend,
     )
-    set_b = set(
-        _keys_from_file(
-            file_b,
-            ptrid,
-            fuzzy=fuzzy,
-            fuzzy_last_offset_step=fuzzy_last_offset_step,
-        ).keys()
-    )
-    common = set_a & set_b
-    only_a = set_a - set_b
-    only_b = set_b - set_a
-    return {
-        "file_a": str(file_a),
-        "file_b": str(file_b),
-        "count_a": len(set_a),
-        "count_b": len(set_b),
-        "common": len(common),
-        "only_a": len(only_a),
-        "only_b": len(only_b),
-        "stability_ratio": round(len(common) / max(len(set_a), 1), 4),
-        "fuzzy": fuzzy,
-        "common_keys": list(common)[:50],
-    }
 
 
 def diff_sqlite_many(

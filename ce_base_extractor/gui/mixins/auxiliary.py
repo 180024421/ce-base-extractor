@@ -6,18 +6,46 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from ce_base_extractor.gui.app_imports import *
+from ce_base_extractor.gui.theme import FONTS, THEME, make_tool_group
+
+
+def _styled_text(parent, **kwargs) -> tk.Text:
+    return tk.Text(
+        parent,
+        font=FONTS["mono"],
+        bg=THEME["surface_alt"],
+        fg=THEME["text"],
+        relief=tk.FLAT,
+        padx=8,
+        pady=8,
+        highlightthickness=1,
+        highlightbackground=THEME["border"],
+        **kwargs,
+    )
 
 
 class AuxMixin:
     def _build_modules_tab(self) -> None:
         ttk.Label(
             self._tab_modules,
-            text="勾选模块作为白名单（不勾选=不过滤）。提取后自动刷新模块统计。",
-        ).pack(anchor=tk.W)
-        mf = ttk.Frame(self._tab_modules)
-        mf.pack(fill=tk.BOTH, expand=True, pady=6)
+            text="勾选模块作为白名单（不勾选 = 不过滤）。提取后自动刷新统计。",
+            style="Hint.TLabel",
+        ).pack(anchor=tk.W, pady=(0, 8))
 
-        self.module_canvas = tk.Canvas(mf, highlightthickness=0)
+        paned = ttk.Panedwindow(self._tab_modules, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
+
+        mod_grp = make_tool_group(paned, "模块白名单")
+        stat_grp = make_tool_group(paned, "模块统计")
+        paned.add(mod_grp, weight=1)
+        paned.add(stat_grp, weight=1)
+
+        mf = ttk.Frame(mod_grp)
+        mf.pack(fill=tk.BOTH, expand=True)
+
+        self.module_canvas = tk.Canvas(
+            mf, highlightthickness=0, bg=THEME["surface"], bd=0
+        )
         self.module_inner = ttk.Frame(self.module_canvas)
         mscroll = ttk.Scrollbar(mf, orient=tk.VERTICAL, command=self.module_canvas.yview)
         self.module_canvas.configure(yscrollcommand=mscroll.set)
@@ -29,19 +57,17 @@ class AuxMixin:
         self.module_inner.bind("<Configure>", self._on_module_frame_configure)
         self.module_canvas.bind("<Configure>", self._on_module_canvas_configure)
 
-        sf = ttk.LabelFrame(self._tab_modules, text="模块统计", padding=4)
-        sf.pack(fill=tk.BOTH, expand=True)
         self.stats_tree = ttk.Treeview(
-            sf,
+            stat_grp,
             columns=("module", "count", "tier", "avg_depth"),
             show="headings",
-            height=6,
+            height=14,
         )
         for col, title, w in (
-            ("module", "模块", 240),
-            ("count", "数量", 80),
-            ("tier", "优先级", 80),
-            ("avg_depth", "均层级", 80),
+            ("module", "模块", 200),
+            ("count", "数量", 72),
+            ("tier", "优先级", 72),
+            ("avg_depth", "均层级", 72),
         ):
             self.stats_tree.heading(col, text=title)
             self.stats_tree.column(col, width=w, anchor=tk.W)
@@ -49,72 +75,89 @@ class AuxMixin:
 
     def _build_monitor_tab(self) -> None:
         row = ttk.Frame(self._tab_monitor)
-        row.pack(fill=tk.X)
+        row.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(row, text="刷新间隔 (秒)").pack(side=tk.LEFT)
         self.monitor_interval_var = tk.IntVar(value=2)
-        ttk.Label(row, text="刷新间隔(秒)").pack(side=tk.LEFT)
         ttk.Spinbox(row, from_=1, to=60, textvariable=self.monitor_interval_var, width=6).pack(
-            side=tk.LEFT, padx=6
+            side=tk.LEFT, padx=8
         )
-        self.monitor_btn = ttk.Button(row, text="开始监控", command=self._toggle_monitor)
-        self.monitor_btn.pack(side=tk.LEFT, padx=6)
+        self.monitor_btn = ttk.Button(
+            row, text="开始监控", style="Accent.TButton", command=self._toggle_monitor
+        )
+        self.monitor_btn.pack(side=tk.LEFT)
+
+        mon_grp = make_tool_group(self._tab_monitor, "实时读数")
+        mon_grp.pack(fill=tk.BOTH, expand=True)
 
         self.monitor_tree = ttk.Treeview(
-            self._tab_monitor,
+            mon_grp,
             columns=("name", "value", "type", "updated"),
             show="headings",
-            height=14,
+            height=16,
         )
         for col, title, w in (
-            ("name", "字段", 120),
-            ("value", "当前值", 160),
-            ("type", "类型", 70),
+            ("name", "字段", 130),
+            ("value", "当前值", 180),
+            ("type", "类型", 72),
             ("updated", "时间", 90),
         ):
             self.monitor_tree.heading(col, text=title)
             self.monitor_tree.column(col, width=w, anchor=tk.W)
-        self.monitor_tree.tag_configure("changed", foreground="#c0392b")
-        self.monitor_tree.tag_configure("same", foreground="#27ae60")
-        self.monitor_tree.pack(fill=tk.BOTH, expand=True, pady=8)
+        self.monitor_tree.tag_configure("changed", foreground=THEME["danger"])
+        self.monitor_tree.tag_configure("same", foreground=THEME["success"])
+        self.monitor_tree.pack(fill=tk.BOTH, expand=True)
 
     def _build_profile_tab(self) -> None:
         row = ttk.Frame(self._tab_profile)
-        row.pack(fill=tk.X, pady=4)
-        ttk.Button(row, text="保存当前为游戏配置", command=self._save_profile).pack(side=tk.LEFT)
-        ttk.Button(row, text="加载配置", command=self._load_profile).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="立即复检", command=self._profile_recheck).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="版本对比", command=self._profile_migrate).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="删除配置", command=self._delete_profile).pack(side=tk.LEFT)
-        ttk.Button(row, text="刷新列表", command=self._refresh_profiles).pack(side=tk.LEFT, padx=6)
+        row.pack(fill=tk.X, pady=(0, 10))
+        for text, cmd in (
+            ("保存配置", self._save_profile),
+            ("加载", self._load_profile),
+            ("复检", self._profile_recheck),
+            ("版本对比", self._profile_migrate),
+            ("删除", self._delete_profile),
+            ("刷新", self._refresh_profiles),
+        ):
+            ttk.Button(row, text=text, command=cmd).pack(side=tk.LEFT, padx=(0, 6))
 
         self.profile_var = tk.StringVar()
-        ttk.Label(self._tab_profile, text="已保存的游戏配置").pack(anchor=tk.W, pady=(8, 0))
+        pick_row = ttk.Frame(self._tab_profile)
+        pick_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(pick_row, text="游戏配置").pack(side=tk.LEFT)
         self.profile_combo = ttk.Combobox(
-            self._tab_profile, textvariable=self.profile_var, state="readonly"
+            pick_row, textvariable=self.profile_var, state="readonly", width=32
         )
-        self.profile_combo.pack(fill=tk.X)
-        self.profile_info = tk.Text(self._tab_profile, height=12, font=("Consolas", 10))
-        self.profile_info.pack(fill=tk.BOTH, expand=True, pady=8)
+        self.profile_combo.pack(side=tk.LEFT, padx=8, fill=tk.X, expand=True)
+
+        info_grp = make_tool_group(self._tab_profile, "配置详情")
+        info_grp.pack(fill=tk.BOTH, expand=True)
+        self.profile_info = _styled_text(info_grp, height=14)
+        self.profile_info.pack(fill=tk.BOTH, expand=True)
         self._refresh_profiles()
 
     def _build_history_tab(self) -> None:
         row = ttk.Frame(self._tab_history)
-        row.pack(fill=tk.X)
-        ttk.Button(row, text="保存当前结果到收藏", command=self._save_favorites).pack(side=tk.LEFT)
-        ttk.Button(row, text="刷新", command=self._refresh_history).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="导出收藏为 Python", command=self._export_history_python).pack(
-            side=tk.LEFT
+        row.pack(fill=tk.X, pady=(0, 10))
+        ttk.Button(row, text="保存到收藏", style="Primary.TButton", command=self._save_favorites).pack(
+            side=tk.LEFT, padx=(0, 6)
         )
+        ttk.Button(row, text="刷新", command=self._refresh_history).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row, text="导出 Python", command=self._export_history_python).pack(side=tk.LEFT)
 
         self.history_game_var = tk.StringVar()
-        ttk.Label(self._tab_history, text="游戏").pack(anchor=tk.W, pady=(8, 0))
+        pick_row = ttk.Frame(self._tab_history)
+        pick_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(pick_row, text="游戏").pack(side=tk.LEFT)
         self.history_combo = ttk.Combobox(
-            self._tab_history, textvariable=self.history_game_var, state="readonly"
+            pick_row, textvariable=self.history_game_var, state="readonly", width=32
         )
-        self.history_combo.pack(fill=tk.X)
+        self.history_combo.pack(side=tk.LEFT, padx=8, fill=tk.X, expand=True)
         self.history_combo.bind("<<ComboboxSelected>>", lambda _e: self._show_history_game())
 
-        self.history_text = tk.Text(self._tab_history, height=16, font=("Consolas", 10))
-        self.history_text.pack(fill=tk.BOTH, expand=True, pady=6)
+        hist_grp = make_tool_group(self._tab_history, "收藏链")
+        hist_grp.pack(fill=tk.BOTH, expand=True)
+        self.history_text = _styled_text(hist_grp, height=16)
+        self.history_text.pack(fill=tk.BOTH, expand=True)
         self._refresh_history()
 
     def _toggle_monitor(self) -> None:

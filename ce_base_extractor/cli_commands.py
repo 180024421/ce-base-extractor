@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ce_base_extractor.compare.sqlite_diff import diff_sqlite_files, diff_sqlite_many
 from ce_base_extractor.export.batch_export import export_all
+from ce_base_extractor.export.context import load_export_context
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import save_result
 from ce_base_extractor.export.frida_script import save_frida_script
@@ -20,6 +21,25 @@ from ce_base_extractor.profiles.store import GameProfile, ProfileStore
 from ce_base_extractor.verify.restart_verify import verify_restart_stability
 from ce_base_extractor.watch.folder_watcher import FolderWatcher
 from ce_base_extractor.watch.incremental_cross import IncrementalCrossValidator
+
+
+def run_list_processes(args) -> int:
+    from ce_base_extractor.filters.presets import get_preset
+    from ce_base_extractor.runtime.win_memory import ProcessMemory
+
+    preset = get_preset(args.preset)
+    names = list(preset.process_names) if preset else ["dnplayer.exe"]
+    try:
+        processes = ProcessMemory.list_matching(names)
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if not processes:
+        print(f"未找到匹配进程: {', '.join(names)}")
+        return 1
+    for proc in processes:
+        print(proc.label)
+    return 0
 
 
 def run_extract(args) -> int:
@@ -56,6 +76,9 @@ def run_extract(args) -> int:
 
     if args.format == "all":
         out_dir = args.output or str(input_path.parent / f"{cfg.game_name}_export")
+        snapshots, pkg = load_export_context(cfg.game_name)
+        if not cfg.android_package and pkg:
+            cfg.android_package = pkg
         files = export_all(
             result,
             out_dir,
@@ -64,6 +87,7 @@ def run_extract(args) -> int:
             pointer_size=cfg.pointer_size,
             target_pid=cfg.target_pid,
             android_package=cfg.android_package,
+            snapshots=snapshots,
         )
         print(f"完成: 导出 {len(files)} 个文件 → {out_dir}")
         return 0
@@ -119,6 +143,8 @@ def run_diff(args) -> int:
             ptrid=ptrid,
             fuzzy=fuzzy,
             fuzzy_last_offset_step=fuzzy_step,
+            sqlite_threshold=cfg.cross_validate_sqlite_threshold,
+            force_sqlite_backend=cfg.cross_validate_force_sqlite,
         )
         print(json.dumps(diff, ensure_ascii=False, indent=2))
     else:
@@ -174,20 +200,51 @@ def run_verify(args) -> int:
 def run_watch(args) -> int:
     folder = Path(args.folder)
     folder.mkdir(parents=True, exist_ok=True)
+    cfg = load_config(args.config)
     print(f"监视目录: {folder.resolve()}  (Ctrl+C 退出)")
     incremental = IncrementalCrossValidator(
-        min_occurrences=max(load_config(args.config).cross_validate_min, 2),
+        min_occurrences=max(cfg.cross_validate_min, 2),
         ptrid=args.ptrid,
-        fuzzy=load_config(args.config).cross_validate_fuzzy,
+        fuzzy=cfg.cross_validate_fuzzy,
+        fuzzy_last_offset_step=cfg.fuzzy_last_offset_step,
+        module_ids=None,
+        sqlite_threshold=cfg.cross_validate_sqlite_threshold,
+        force_sqlite_backend=cfg.cross_validate_force_sqlite,
     )
+    export_dir = Path(getattr(args, "export_dir", None) or folder / f"{args.game}_auto_export")
 
     def on_error(path: Path, exc: Exception) -> None:
         print(f"  [错误] {path.name}: {exc}", file=sys.stderr)
 
+    def _auto_export_result(result, source: Path) -> None:
+        snapshots, pkg = load_export_context(cfg.game_name)
+        if not cfg.android_package and pkg:
+            cfg.android_package = pkg
+        files = export_all(
+            result,
+            export_dir,
+            game_name=cfg.game_name,
+            preset_id=cfg.preset,
+            pointer_size=cfg.pointer_size,
+            target_pid=cfg.target_pid,
+            android_package=cfg.android_package,
+            snapshots=snapshots,
+        )
+        store = ProfileStore()
+        profile = GameProfile.from_result(
+            result,
+            cfg.game_name,
+            preset=cfg.preset,
+            pointer_size=cfg.pointer_size,
+            target_pid=cfg.target_pid,
+            android_package=cfg.android_package,
+        )
+        store.save(profile)
+        print(f"  已导出 {len(files)} 个文件 → {export_dir}，Profile 已更新")
+
     def on_new(path: Path) -> None:
         print(f"[新文件] {path.name}")
         if args.auto_extract:
-            cfg = load_config(args.config)
             cfg.game_name = args.game
             try:
                 if getattr(args, "incremental_cross", False):
@@ -195,22 +252,25 @@ def run_watch(args) -> int:
                     print(
                         f"  增量交叉: +{info['new_unique_keys']} 键, 稳定 {info['stable_keys']} 条"
                     )
-                    stable = incremental.stable_chains()
+                    stable, meta = incremental.ranked_stable_chains(cfg)
                     if stable:
                         from ce_base_extractor.models import ExtractResult
 
                         result = ExtractResult(
-                            chains=stable[: cfg.top_n],
-                            total_raw=len(stable),
-                            total_after_filter=min(len(stable), cfg.top_n),
+                            chains=stable,
+                            total_raw=meta.get("unique_keys", len(stable)),
+                            total_after_filter=len(stable),
                             modules_seen=sorted({c.module_name for c in stable}),
                             source_file=str(path),
-                            cross_validate_meta=incremental.meta(),
+                            cross_validate_meta=meta,
                         )
-                        print(f"  当前稳定链: {len(result.chains)} 条")
+                        print(f"  当前稳定链(打分后): {len(result.chains)} 条")
+                        if not getattr(args, "no_export_on_stable", False):
+                            _auto_export_result(result, path)
                 else:
                     result = extract(path, config=cfg)
                     print(f"  提取: {len(result.chains)} 条稳定链")
+                    _auto_export_result(result, path)
             except Exception as exc:
                 print(f"  提取失败: {exc}", file=sys.stderr)
 

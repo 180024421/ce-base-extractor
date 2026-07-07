@@ -5,38 +5,48 @@ from pathlib import Path
 from tkinter import ttk
 
 from ce_base_extractor.gui.app_imports import *
+from ce_base_extractor.gui.theme import FONTS, THEME
 
 
 class ShellMixin:
     def _build_ui(self) -> None:
-        header = ttk.Frame(self, padding=(12, 8))
+        # ── 顶栏 ──
+        header = ttk.Frame(self, style="Header.TFrame", padding=(20, 14))
         header.pack(fill=tk.X)
-        ttk.Label(
-            header,
-            text="CE 指针扫描 → 稳定基址 → Python 内存读取脚本",
-            font=("Segoe UI", 12, "bold"),
-        ).pack(anchor=tk.W)
-        ttk.Label(
-            header,
-            text="默认雷电模拟器 · 支持多轮 Rescan 交叉验证 · 一键生成 Python 读取脚本",
-            foreground="#555",
-        ).pack(anchor=tk.W)
+        header_inner = ttk.Frame(header, style="Header.TFrame")
+        header_inner.pack(fill=tk.X)
 
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+        title_col = ttk.Frame(header_inner, style="Header.TFrame")
+        title_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(title_col, text="CE 基址提取器", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            title_col,
+            text="指针扫描 → 稳定基址 → 脚本导出 · 雷电 / 逍遥 / 蓝叠",
+            style="Subtitle.TLabel",
+        ).pack(anchor=tk.W, pady=(2, 0))
 
-        self._tab_extract = ttk.Frame(self.notebook, padding=8)
-        self._tab_cross = ttk.Frame(self.notebook, padding=8)
-        self._tab_modules = ttk.Frame(self.notebook, padding=8)
-        self._tab_history = ttk.Frame(self.notebook, padding=8)
-        self._tab_monitor = ttk.Frame(self.notebook, padding=8)
-        self._tab_profile = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self._tab_extract, text="单文件提取")
-        self.notebook.add(self._tab_cross, text="交叉验证")
-        self.notebook.add(self._tab_modules, text="模块过滤")
-        self.notebook.add(self._tab_monitor, text="实时监控")
-        self.notebook.add(self._tab_profile, text="游戏配置")
-        self.notebook.add(self._tab_history, text="收藏历史")
+        tk.Frame(header, bg=THEME["border"], height=1).pack(fill=tk.X, side=tk.BOTTOM)
+
+        # ── 主内容 ──
+        body = ttk.Frame(self, padding=(16, 12))
+        body.pack(fill=tk.BOTH, expand=True)
+
+        self.notebook = ttk.Notebook(body)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        self._tab_extract = ttk.Frame(self.notebook, padding=(4, 8))
+        self._tab_cross = ttk.Frame(self.notebook, padding=(4, 8))
+        self._tab_modules = ttk.Frame(self.notebook, padding=(4, 8))
+        self._tab_monitor = ttk.Frame(self.notebook, padding=(4, 8))
+        self._tab_profile = ttk.Frame(self.notebook, padding=(4, 8))
+        self._tab_history = ttk.Frame(self.notebook, padding=(4, 8))
+
+        self.notebook.add(self._tab_extract, text="  提取  ")
+        self.notebook.add(self._tab_cross, text="  交叉验证  ")
+        self.notebook.add(self._tab_modules, text="  模块  ")
+        self.notebook.add(self._tab_monitor, text="  监控  ")
+        self.notebook.add(self._tab_profile, text="  配置  ")
+        self.notebook.add(self._tab_history, text="  收藏  ")
 
         self._build_extract_tab()
         self._build_cross_tab()
@@ -44,38 +54,50 @@ class ShellMixin:
         self._build_monitor_tab()
         self._build_profile_tab()
         self._build_history_tab()
+
         self._build_footer()
 
     def _build_footer(self) -> None:
-        footer = ttk.Frame(self, padding=(12, 6))
-        footer.pack(fill=tk.X)
-        ttk.Button(footer, text="复制全部", command=self._copy_all).pack(side=tk.LEFT)
-        ttk.Button(footer, text="导出 TXT", command=lambda: self._export("txt")).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(footer, text="导出 JSON", command=lambda: self._export("json")).pack(
-            side=tk.LEFT
-        )
-        ttk.Button(footer, text="保存配置", command=self._save_user_config).pack(
-            side=tk.LEFT, padx=12
-        )
+        # 工具栏
+        toolbar = ttk.Frame(self, padding=(16, 8))
+        toolbar.pack(fill=tk.X)
+
+        left = ttk.Frame(toolbar)
+        left.pack(side=tk.LEFT)
+        ttk.Button(left, text="复制全部", command=self._copy_all).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(left, text="TXT", command=lambda: self._export("txt")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(left, text="JSON", command=lambda: self._export("json")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(left, text="保存配置", command=self._save_user_config).pack(side=tk.LEFT, padx=(12, 0))
+
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=12)
 
         self.watch_var = tk.BooleanVar(value=False)
         self.watch_incremental_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            footer,
-            text=f"监视导出目录 ({WATCH_DIR.name})",
+            toolbar,
+            text=f"监视 {WATCH_DIR.name}",
             variable=self.watch_var,
             command=self._toggle_watch,
-        ).pack(side=tk.LEFT, padx=8)
-        ttk.Checkbutton(
-            footer,
-            text="增量交叉",
-            variable=self.watch_incremental_var,
-        ).pack(side=tk.LEFT)
+        ).pack(side=tk.LEFT, padx=4)
+        ttk.Checkbutton(toolbar, text="增量交叉", variable=self.watch_incremental_var).pack(
+            side=tk.LEFT
+        )
 
-        self.status_var = tk.StringVar(value="就绪 · 默认雷电模拟器")
-        ttk.Label(footer, textvariable=self.status_var).pack(side=tk.RIGHT)
+        # 状态栏
+        status_bar = tk.Frame(self, bg=THEME["status_bg"], height=30)
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        status_bar.pack_propagate(False)
+
+        self.status_var = tk.StringVar(value="就绪")
+        tk.Label(
+            status_bar,
+            textvariable=self.status_var,
+            bg=THEME["status_bg"],
+            fg=THEME["status_fg"],
+            font=FONTS["small"],
+            anchor=tk.W,
+            padx=16,
+        ).pack(side=tk.LEFT, fill=tk.Y)
 
     def _save_user_config(self) -> None:
         cfg = self._current_config()

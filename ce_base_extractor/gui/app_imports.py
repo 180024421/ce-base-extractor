@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ce_base_extractor.compare.sqlite_diff import diff_sqlite_files, diff_sqlite_many
 from ce_base_extractor.export.batch_export import export_all
+from ce_base_extractor.export.context import load_export_context
 from ce_base_extractor.export.ct_export import result_to_ct
 from ce_base_extractor.export.formatter import format_ce_table, to_json, to_text
 from ce_base_extractor.export.lua_script import save_lua_script
@@ -57,6 +58,7 @@ __all__ = [
     "to_text",
     "to_json",
     "export_all",
+    "load_export_context",
     "result_to_ct",
     "save_python_script",
     "save_lua_script",

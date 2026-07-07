@@ -75,6 +75,22 @@ class IncrementalCrossValidator:
             )
         return out
 
+    def ranked_stable_chains(self, cfg) -> tuple[list[PointerChain], dict]:
+        """与批量交叉验证一致的流式打分 Top-N。"""
+        from ce_base_extractor.filters.stream_rank import filter_and_rank_cross_stream
+
+        total = len(self._files)
+        if total < self.min_occurrences:
+            return [], self.meta()
+        stable_iter = self._counter.items_at_least(self.min_occurrences)
+        chains, _stable_count, module_stats = filter_and_rank_cross_stream(
+            stable_iter, cfg, total
+        )
+        meta = self.meta()
+        meta["module_stats"] = module_stats
+        meta["ranked"] = True
+        return chains, meta
+
     def meta(self) -> dict:
         total = len(self._files)
         in_all = self._counter.count_in_all() if total else 0

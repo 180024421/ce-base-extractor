@@ -1,4 +1,8 @@
-"""自包含 ProcessMemory，供导出脚本内嵌（勿添加外部依赖）。"""
+"""自包含 ProcessMemory，供导出脚本内嵌（勿添加外部依赖）。
+
+与 ce_base_extractor.runtime.win_memory 能力对齐：
+模块缓存、PID 校验、模糊模块名匹配、缓存失效。
+"""
 
 from __future__ import annotations
 
@@ -45,13 +49,19 @@ class MODULEENTRY32(ctypes.Structure):
     ]
 
 
+def _raise_last_error(msg: str) -> None:
+    err = ctypes.get_last_error()
+    raise OSError(err, f"{msg} (winerror={err})")
+
+
 class ProcessMemory:
     def __init__(self, pid: int, process_name: str) -> None:
         self.pid = pid
         self.process_name = process_name
         self._handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
         if not self._handle:
-            raise OSError(f"无法打开进程 PID={pid}")
+            _raise_last_error(f"无法打开进程 PID={pid}")
+        self._module_cache: dict[str, int] | None = None
 
     def close(self) -> None:
         if self._handle:
@@ -69,13 +79,13 @@ class ProcessMemory:
         names = {n.lower() for n in process_names}
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
         if snap == INVALID_HANDLE_VALUE:
-            raise OSError("CreateToolhelp32Snapshot 失败")
+            _raise_last_error("CreateToolhelp32Snapshot 失败")
         entry = PROCESSENTRY32()
         entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
         found: list[tuple[int, str]] = []
         try:
             if not kernel32.Process32First(snap, ctypes.byref(entry)):
-                raise OSError("Process32First 失败")
+                _raise_last_error("Process32First 失败")
             while True:
                 exe = entry.szExeFile.decode("utf-8", errors="ignore")
                 if exe.lower() in names:
@@ -89,22 +99,34 @@ class ProcessMemory:
     @classmethod
     def auto_attach(cls, process_names, pid=None) -> ProcessMemory:
         if pid is not None:
-            return cls(int(pid), "selected")
+            matches = cls.list_matching(process_names)
+            for found_pid, name in matches:
+                if found_pid == int(pid):
+                    return cls(found_pid, name)
+            known = [f"{p}({n})" for p, n in matches]
+            raise ProcessLookupError(
+                f"PID {pid} 不在预设进程 {list(process_names)} 中；当前匹配: {known or '无'}"
+            )
         matches = cls.list_matching(process_names)
         if not matches:
             raise ProcessLookupError(f"未找到进程: {list(process_names)}")
         return cls(matches[0][0], matches[0][1])
 
-    def list_modules(self) -> dict[str, int]:
+    def invalidate_module_cache(self) -> None:
+        self._module_cache = None
+
+    def list_modules(self, refresh: bool = False) -> dict[str, int]:
+        if self._module_cache is not None and not refresh:
+            return self._module_cache
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, self.pid)
         if snap == INVALID_HANDLE_VALUE:
-            raise OSError("模块枚举失败")
+            _raise_last_error("模块枚举失败")
         entry = MODULEENTRY32()
         entry.dwSize = ctypes.sizeof(MODULEENTRY32)
         modules: dict[str, int] = {}
         try:
             if not kernel32.Module32First(snap, ctypes.byref(entry)):
-                raise OSError("Module32First 失败")
+                _raise_last_error("Module32First 失败")
             while True:
                 name = entry.szModule.decode("utf-8", errors="ignore")
                 base = ctypes.cast(entry.modBaseAddr, ctypes.c_void_p).value or 0
@@ -113,6 +135,7 @@ class ProcessMemory:
                     break
         finally:
             kernel32.CloseHandle(snap)
+        self._module_cache = modules
         return modules
 
     def get_module_base(self, module_name: str) -> int:
@@ -120,19 +143,34 @@ class ProcessMemory:
         key = module_name.lower()
         if key in modules:
             return modules[key]
+        basename = key.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if basename in modules:
+            return modules[basename]
+        candidates: list[tuple[str, int]] = []
         for name, base in modules.items():
-            if key in name or name in key:
+            if name == basename or name.endswith(f"/{basename}") or name.endswith(f"\\{basename}"):
                 return base
-        raise KeyError(f"模块未找到: {module_name}")
+            if name.endswith(key) or key.endswith(name):
+                candidates.append((name, base))
+        if candidates:
+            candidates.sort(key=lambda x: (len(x[0]), x[0]))
+            return candidates[0][1]
+        sample = ", ".join(sorted(modules.keys())[:6])
+        raise KeyError(f"模块未找到: {module_name}；示例: {sample}")
 
     def read_bytes(self, address: int, size: int) -> bytes:
         buf = ctypes.create_string_buffer(size)
         read = ctypes.c_size_t(0)
         ok = kernel32.ReadProcessMemory(
-            self._handle, ctypes.c_void_p(address), buf, size, ctypes.byref(read)
+            self._handle,
+            ctypes.c_void_p(address),
+            buf,
+            size,
+            ctypes.byref(read),
         )
         if not ok or read.value < size:
-            raise OSError(f"读取失败 @ 0x{address:X}")
+            self.invalidate_module_cache()
+            _raise_last_error(f"读取内存失败 @ 0x{address:X}")
         return buf.raw
 
     def read_i32(self, address: int) -> int:
@@ -154,8 +192,9 @@ class ProcessMemory:
         return struct.unpack("<d", self.read_bytes(address, 8))[0]
 
     def read_pointer(self, address: int, pointer_size: int = 8) -> int:
-        fmt = "<Q" if pointer_size == 8 else "<I"
-        return struct.unpack(fmt, self.read_bytes(address, pointer_size))[0]
+        if pointer_size == 8:
+            return self.read_u64(address)
+        return self.read_u32(address)
 
     def resolve_chain(
         self, module_name: str, module_offset: int, offsets, pointer_size: int = 8

@@ -68,7 +68,9 @@ def export_all(
             preset_id=preset_id,
         )
     )
-    files.append(save_lua_script(result, out / f"{game_name}_reader.lua"))
+    files.append(
+        save_lua_script(result, out / f"{game_name}_reader.lua", game_name=game_name, preset_id=preset_id)
+    )
     files.append(
         save_frida_guest_script(
             result,

@@ -9,8 +9,8 @@ def _make_chain(mod: str, base: int, offs: tuple[int, ...]) -> PointerChain:
 def test_diff_two_files(sample_sqlite_pair):
     r1, r2 = sample_sqlite_pair
     diff = diff_sqlite_files(r1, r2)
-    assert diff["count_a"] >= 1
-    assert diff["common"] >= 1
+    assert diff["file_count"] == 2
+    assert diff["in_all"] >= 1
     assert 0 <= diff["stability_ratio"] <= 1
 
 

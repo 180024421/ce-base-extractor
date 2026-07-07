@@ -5,31 +5,34 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from ce_base_extractor.gui.app_imports import *
+from ce_base_extractor.gui.theme import THEME, FileDropCard, make_tool_group
 
 
 class ExtractMixin:
     def _build_extract_tab(self) -> None:
-        row = ttk.Frame(self._tab_extract)
-        row.pack(fill=tk.X)
-        ttk.Button(row, text="选择 SQLite/PTR", command=self._browse).pack(side=tk.LEFT)
-        ttk.Button(row, text="提取基址", command=self._run_extract).pack(side=tk.LEFT, padx=6)
-        ttk.Button(row, text="导出 Python", command=self._export_python).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="导出 Lua", command=self._export_lua).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="导出 SCC JSON", command=self._export_scc).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="导出 .CT", command=self._export_ct).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="选进程", command=self._pick_process).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="记录读数", command=self._snapshot_values).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="重启验证", command=self._restart_verify).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="测试读取", command=self._test_read).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="智能命名", command=self._auto_name).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="一键导出全部", command=self._export_all).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row, text="导入SCC", command=self._import_scc).pack(side=tk.LEFT, padx=4)
+        # ── 主操作 ──
+        top = ttk.Frame(self._tab_extract)
+        top.pack(fill=tk.X, pady=(0, 10))
 
-        self.file_var = tk.StringVar(value="拖放或选择 CE 导出文件")
-        ttk.Label(self._tab_extract, textvariable=self.file_var).pack(anchor=tk.W, pady=6)
+        primary = ttk.Frame(top)
+        primary.pack(side=tk.LEFT)
+        ttk.Button(primary, text="选择文件", style="Primary.TButton", command=self._browse).pack(
+            side=tk.LEFT, padx=(0, 6)
+        )
+        ttk.Button(primary, text="提取基址", style="Accent.TButton", command=self._run_extract).pack(
+            side=tk.LEFT, padx=(0, 6)
+        )
+        ttk.Button(primary, text="选进程", command=self._pick_process).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(primary, text="导入 SCC", command=self._import_scc).pack(side=tk.LEFT)
 
-        opts = ttk.LabelFrame(self._tab_extract, text="参数", padding=8)
-        opts.pack(fill=tk.X, pady=4)
+        # ── 文件卡片 ──
+        self.file_var = tk.StringVar(value="尚未选择文件")
+        self._file_card = FileDropCard(self._tab_extract, self.file_var)
+        self._file_card.pack(fill=tk.X, pady=(0, 10))
+
+        # ── 参数区 ──
+        opts = make_tool_group(self._tab_extract, "提取参数")
+        opts.pack(fill=tk.X, pady=(0, 8))
 
         self.preset_var = tk.StringVar(value=self._config.preset)
         self.top_n_var = tk.IntVar(value=self._config.top_n)
@@ -43,110 +46,176 @@ class ExtractMixin:
         self.il2cpp_var = tk.StringVar(value=self._config.il2cpp_map_path or "")
         self.pid_label_var = tk.StringVar(value="进程: 自动")
 
-        ttk.Label(opts, text="模拟器").grid(row=0, column=0, sticky=tk.W)
+        grid = ttk.Frame(opts)
+        grid.pack(fill=tk.X)
+
+        ttk.Label(grid, text="模拟器").grid(row=0, column=0, sticky=tk.W, padx=(0, 4), pady=3)
         ttk.Combobox(
-            opts,
+            grid,
             textvariable=self.preset_var,
             values=[p.id for p in PRESETS.values()],
             state="readonly",
-            width=12,
-        ).grid(row=0, column=1, padx=4)
-        ttk.Label(opts, text="游戏名").grid(row=0, column=2, sticky=tk.W, padx=(12, 0))
-        ttk.Entry(opts, textvariable=self.game_name_var, width=14).grid(row=0, column=3, padx=4)
-        ttk.Label(opts, text="ptrid").grid(row=0, column=4, sticky=tk.W, padx=(12, 0))
-        ttk.Entry(opts, textvariable=self.ptrid_var, width=8).grid(row=0, column=5, padx=4)
+            width=11,
+        ).grid(row=0, column=1, sticky=tk.W, padx=(0, 16), pady=3)
+        ttk.Label(grid, text="游戏名").grid(row=0, column=2, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Entry(grid, textvariable=self.game_name_var, width=14).grid(
+            row=0, column=3, sticky=tk.W, padx=(0, 16), pady=3
+        )
+        ttk.Label(grid, text="ptrid").grid(row=0, column=4, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Entry(grid, textvariable=self.ptrid_var, width=8).grid(row=0, column=5, sticky=tk.W, pady=3)
 
-        ttk.Label(opts, text="输出条数").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-        ttk.Spinbox(opts, from_=1, to=200, textvariable=self.top_n_var, width=8).grid(
-            row=1, column=1, padx=4, pady=(6, 0)
+        ttk.Label(grid, text="输出条数").grid(row=1, column=0, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Spinbox(grid, from_=1, to=200, textvariable=self.top_n_var, width=8).grid(
+            row=1, column=1, sticky=tk.W, padx=(0, 16), pady=3
         )
-        ttk.Label(opts, text="最大层级").grid(
-            row=1, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0)
+        ttk.Label(grid, text="最大层级").grid(row=1, column=2, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Spinbox(grid, from_=1, to=10, textvariable=self.max_depth_var, width=8).grid(
+            row=1, column=3, sticky=tk.W, padx=(0, 16), pady=3
         )
-        ttk.Spinbox(opts, from_=1, to=10, textvariable=self.max_depth_var, width=8).grid(
-            row=1, column=3, padx=4, pady=(6, 0)
-        )
-        ttk.Label(opts, text="末级偏移(hex)").grid(
-            row=1, column=4, sticky=tk.W, padx=(12, 0), pady=(6, 0)
-        )
-        ttk.Entry(opts, textvariable=self.end_offset_var, width=10).grid(
-            row=1, column=5, padx=4, pady=(6, 0)
-        )
-        ttk.Checkbutton(opts, text="模拟器模式", variable=self.emulator_var).grid(
-            row=1, column=6, padx=(12, 0), pady=(6, 0)
-        )
-        ttk.Label(opts, text="指针宽度").grid(row=2, column=0, sticky=tk.W, pady=(6, 0))
+        ttk.Label(grid, text="末级偏移(hex)").grid(row=1, column=4, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Entry(grid, textvariable=self.end_offset_var, width=10).grid(row=1, column=5, sticky=tk.W, pady=3)
+
+        row2 = ttk.Frame(grid)
+        row2.grid(row=2, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+        ttk.Label(row2, text="指针宽度").pack(side=tk.LEFT)
         ttk.Combobox(
-            opts, textvariable=self.pointer_size_var, values=("4", "8"), width=6, state="readonly"
-        ).grid(row=2, column=1, padx=4, pady=(6, 0), sticky=tk.W)
-        ttk.Label(opts, text="Il2Cpp 映射").grid(
-            row=2, column=2, sticky=tk.W, padx=(12, 0), pady=(6, 0)
-        )
-        ttk.Entry(opts, textvariable=self.il2cpp_var, width=36).grid(
-            row=2, column=3, columnspan=2, padx=4, pady=(6, 0)
-        )
-        ttk.Button(opts, text="浏览", command=self._browse_il2cpp).grid(
-            row=2, column=5, pady=(6, 0)
-        )
-        ttk.Label(opts, textvariable=self.pid_label_var).grid(
-            row=2, column=6, padx=(12, 0), pady=(6, 0), sticky=tk.W
+            row2, textvariable=self.pointer_size_var, values=("4", "8"), width=5, state="readonly"
+        ).pack(side=tk.LEFT, padx=(4, 16))
+        ttk.Checkbutton(row2, text="模拟器模式", variable=self.emulator_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(row2, text="Il2Cpp").pack(side=tk.LEFT)
+        ttk.Entry(row2, textvariable=self.il2cpp_var, width=32).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="浏览", command=self._browse_il2cpp).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(row2, textvariable=self.pid_label_var, foreground=THEME["text_secondary"]).pack(
+            side=tk.LEFT
         )
 
-        adv = ttk.LabelFrame(self._tab_extract, text="高级选项", padding=8)
-        adv.pack(fill=tk.X, pady=4)
+        # ── 导出 / 验证（双列工具组）──
+        tools_row = ttk.Frame(self._tab_extract)
+        tools_row.pack(fill=tk.X, pady=(0, 8))
+        tools_row.columnconfigure(0, weight=1)
+        tools_row.columnconfigure(1, weight=1)
+
+        export_grp = make_tool_group(tools_row, "导出")
+        export_grp.grid(row=0, column=0, sticky=tk.NSEW, padx=(0, 6))
+        exp_inner = ttk.Frame(export_grp)
+        exp_inner.pack(fill=tk.X)
+        for i, (text, cmd) in enumerate(
+            [
+                ("Python", self._export_python),
+                ("Lua", self._export_lua),
+                ("SCC JSON", self._export_scc),
+                (".CT", self._export_ct),
+                ("全部", self._export_all),
+            ]
+        ):
+            ttk.Button(exp_inner, text=text, command=cmd).grid(row=0, column=i, padx=3, pady=2)
+
+        verify_grp = make_tool_group(tools_row, "验证与工具")
+        verify_grp.grid(row=0, column=1, sticky=tk.NSEW, padx=(6, 0))
+        ver_inner = ttk.Frame(verify_grp)
+        ver_inner.pack(fill=tk.X)
+        for i, (text, cmd) in enumerate(
+            [
+                ("记录读数", self._snapshot_values),
+                ("重启验证", self._restart_verify),
+                ("测试读取", self._test_read),
+                ("智能命名", self._auto_name),
+            ]
+        ):
+            ttk.Button(ver_inner, text=text, command=cmd).grid(row=0, column=i, padx=3, pady=2)
+
+        # ── 高级选项（可折叠）──
+        self._adv_visible = tk.BooleanVar(value=False)
+        adv_toggle = ttk.Checkbutton(
+            self._tab_extract,
+            text="显示高级选项",
+            variable=self._adv_visible,
+            command=self._toggle_advanced,
+        )
+        adv_toggle.pack(anchor=tk.W, pady=(0, 4))
+
+        self._adv_frame = ttk.Frame(self._tab_extract)
+        adv_inner = make_tool_group(self._adv_frame, "高级")
+        adv_inner.pack(fill=tk.X)
         self.live_probe_var = tk.BooleanVar(value=self._config.live_probe)
         self.probe_drop_var = tk.BooleanVar(value=self._config.probe_drop_unreadable)
         self.fuzzy_var = tk.BooleanVar(value=self._config.fuzzy_dedupe)
         self.cross_all_var = tk.BooleanVar(value=self._config.cross_validate_require_all)
         self.stream_var = tk.BooleanVar(value=self._config.stream_single_file)
         self.android_pkg_var = tk.StringVar(value=getattr(self._config, "android_package", ""))
-        ttk.Checkbutton(adv, text="在线探针", variable=self.live_probe_var).pack(side=tk.LEFT)
-        ttk.Checkbutton(adv, text="剔除不可读", variable=self.probe_drop_var).pack(
-            side=tk.LEFT, padx=8
-        )
-        ttk.Checkbutton(adv, text="模糊去重", variable=self.fuzzy_var).pack(side=tk.LEFT)
-        ttk.Checkbutton(adv, text="交叉需全命中", variable=self.cross_all_var).pack(
-            side=tk.LEFT, padx=8
-        )
-        ttk.Checkbutton(adv, text="流式读取", variable=self.stream_var).pack(side=tk.LEFT)
-        ttk.Label(adv, text="Android包名").pack(side=tk.LEFT, padx=(12, 4))
-        ttk.Entry(adv, textvariable=self.android_pkg_var, width=28).pack(side=tk.LEFT)
 
-        paned = ttk.Panedwindow(self._tab_extract, orient=tk.VERTICAL)
-        paned.pack(fill=tk.BOTH, expand=True, pady=6)
+        adv_grid = ttk.Frame(adv_inner)
+        adv_grid.pack(fill=tk.X)
+        for i, (text, var) in enumerate(
+            [
+                ("在线探针", self.live_probe_var),
+                ("剔除不可读", self.probe_drop_var),
+                ("模糊去重", self.fuzzy_var),
+                ("交叉需全命中", self.cross_all_var),
+                ("流式读取", self.stream_var),
+            ]
+        ):
+            ttk.Checkbutton(adv_grid, text=text, variable=var).grid(row=0, column=i, padx=(0, 12), sticky=tk.W)
+        pkg_row = ttk.Frame(adv_inner)
+        pkg_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(pkg_row, text="Android 包名").pack(side=tk.LEFT)
+        ttk.Entry(pkg_row, textvariable=self.android_pkg_var, width=36).pack(side=tk.LEFT, padx=8)
 
-        list_frame = ttk.LabelFrame(paned, text="结果（双击复制 CE 表达式）", padding=4)
-        detail_frame = ttk.LabelFrame(paned, text="详情", padding=4)
-        paned.add(list_frame, weight=2)
-        paned.add(detail_frame, weight=3)
+        # ── 结果区 ──
+        self._results_paned = ttk.Panedwindow(self._tab_extract, orient=tk.VERTICAL)
+        self._results_paned.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
+        list_frame = make_tool_group(self._results_paned, "结果列表 · 双击复制 CE 表达式")
+        detail_frame = make_tool_group(self._results_paned, "详情")
+        self._results_paned.add(list_frame, weight=2)
+        self._results_paned.add(detail_frame, weight=3)
+
+        tree_wrap = ttk.Frame(list_frame)
+        tree_wrap.pack(fill=tk.BOTH, expand=True)
         self.tree = ttk.Treeview(
-            list_frame,
+            tree_wrap,
             columns=("score", "name", "type", "module", "base", "depth", "verified"),
             show="headings",
         )
         for col, title, w in (
-            ("score", "评分", 50),
-            ("name", "字段名", 90),
-            ("type", "类型", 60),
-            ("module", "模块", 180),
+            ("score", "评分", 52),
+            ("name", "字段", 100),
+            ("type", "类型", 56),
+            ("module", "模块", 200),
             ("base", "基址", 100),
-            ("depth", "层级", 40),
-            ("verified", "验证", 40),
+            ("depth", "层级", 44),
+            ("verified", "✓", 36),
         ):
             self.tree.heading(col, text=title)
             self.tree.column(col, width=w, anchor=tk.W)
         self.tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-        sb = ttk.Scrollbar(list_frame, command=self.tree.yview)
+        sb = ttk.Scrollbar(tree_wrap, command=self.tree.yview)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.bind("<Double-1>", self._on_tree_double_click)
-        ttk.Button(list_frame, text="编辑字段", command=self._edit_selected_chain).pack(
-            side=tk.BOTTOM, pady=4
+        ttk.Button(list_frame, text="编辑选中字段", command=self._edit_selected_chain).pack(
+            anchor=tk.E, pady=(6, 0)
         )
 
-        self.detail = tk.Text(detail_frame, wrap=tk.WORD, font=("Consolas", 10))
+        self.detail = tk.Text(
+            detail_frame,
+            wrap=tk.WORD,
+            font=("Cascadia Mono", 10),
+            bg=THEME["surface_alt"],
+            fg=THEME["text"],
+            relief=tk.FLAT,
+            padx=8,
+            pady=8,
+            highlightthickness=1,
+            highlightbackground=THEME["border"],
+        )
         self.detail.pack(fill=tk.BOTH, expand=True)
+
+    def _toggle_advanced(self) -> None:
+        if self._adv_visible.get():
+            self._adv_frame.pack(fill=tk.X, pady=(0, 8), before=self._results_paned)
+        else:
+            self._adv_frame.pack_forget()
 
     def _run_extract(self) -> None:
         if not self._current_file:
@@ -321,6 +390,14 @@ class ExtractMixin:
         self._history.mark_verified(game, verified_names)
         messagebox.showinfo("重启验证", "\n".join(lines[:15]))
 
+    def _export_snapshots_context(self) -> tuple[dict[str, dict] | None, str]:
+        game = self.game_name_var.get().strip() or "game"
+        return load_export_context(
+            game,
+            session_values=self._before_verify or None,
+            android_fallback=self.android_pkg_var.get().strip(),
+        )
+
     def _export_scc(self) -> None:
         if not self._result:
             return
@@ -329,7 +406,14 @@ class ExtractMixin:
             initialfile=f"{self.game_name_var.get()}_bases_scc.json",
         )
         if path:
-            save_scc_json(self._result, path, preset_id=self.preset_var.get())
+            snapshots, android_pkg = self._export_snapshots_context()
+            save_scc_json(
+                self._result,
+                path,
+                preset_id=self.preset_var.get(),
+                snapshots=snapshots,
+                android_package=android_pkg,
+            )
             self.status_var.set(f"已导出 SCC: {path}")
 
     def _export_lua(self) -> None:
@@ -340,7 +424,11 @@ class ExtractMixin:
             initialfile=f"{self.game_name_var.get()}_reader.lua",
         )
         if path:
-            save_lua_script(self._result, path)
+            save_lua_script(
+                self._result,
+                path,
+                game_name=self.game_name_var.get().strip() or "game",
+            )
             self.status_var.set(f"已导出 Lua: {path}")
 
     def _copy_all(self) -> None:
@@ -449,6 +537,7 @@ class ExtractMixin:
         if not folder:
             return
         game = self.game_name_var.get().strip() or "game"
+        snapshots, android_pkg = self._export_snapshots_context()
         files = export_all(
             self._result,
             folder,
@@ -456,6 +545,8 @@ class ExtractMixin:
             preset_id=self.preset_var.get(),
             pointer_size=int(self.pointer_size_var.get()),
             target_pid=self._target_pid,
+            android_package=android_pkg,
+            snapshots=snapshots,
         )
         messagebox.showinfo("导出完成", f"已导出 {len(files)} 个文件到:\n{folder}")
 

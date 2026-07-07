@@ -57,6 +57,35 @@ PRESETS: dict[str, EmulatorPreset] = {
         preferred_modules=("libil2cpp.so", "libunity.so"),
         score_bonus_modules=("libil2cpp.so",),
     ),
+    "xiaoyao": EmulatorPreset(
+        id="xiaoyao",
+        label="逍遥模拟器",
+        process_names=("memu.exe", "memuheadless.exe", "microvirt.exe"),
+        host_module_patterns=("memu", "microvirt", "xiaoyao"),
+        preferred_modules=("libil2cpp.so", "libunity.so", "libmain.so"),
+        score_bonus_modules=("libil2cpp.so",),
+    ),
+    "huawei": EmulatorPreset(
+        id="huawei",
+        label="华为移动引擎",
+        process_names=("hwemu.exe", "hwandroid.exe", "hvmheadless.exe"),
+        host_module_patterns=("hwemu", "hwandroid", "hvm"),
+        preferred_modules=("libil2cpp.so", "libunity.so"),
+        score_bonus_modules=("libil2cpp.so",),
+    ),
+    "ldplayer9": EmulatorPreset(
+        id="ldplayer9",
+        label="雷电 9 多开",
+        process_names=(
+            "dnplayer.exe",
+            "ld9boxheadless.exe",
+            "ldboxheadless.exe",
+            "ldvboxheadless.exe",
+        ),
+        host_module_patterns=("dnplayer", "ldbox", "ld9box", "ldvbox"),
+        preferred_modules=("libil2cpp.so", "libunity.so", "libmain.so"),
+        score_bonus_modules=("libil2cpp.so", "libunity.so"),
+    ),
 }
 
 

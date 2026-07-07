@@ -8,6 +8,7 @@ from ce_base_extractor.cli_commands import (
     run_diff,
     run_extract,
     run_import_scc,
+    run_list_processes,
     run_profile_migrate,
     run_scc_recheck,
     run_verify,
@@ -79,6 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     watch_p.add_argument("--ptrid", type=int)
     watch_p.add_argument("--game", default="game")
     watch_p.add_argument("--config")
+    watch_p.add_argument("--export-dir", help="稳定链自动导出目录")
+    watch_p.add_argument(
+        "--no-export-on-stable", action="store_true", help="增量交叉后不自动导出"
+    )
 
     mig_p = sub.add_parser("profile-migrate", help="对比或迁移游戏 Profile")
     mig_p.add_argument("--profile", required=True)
@@ -102,6 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     imp_p.add_argument("--preset", default="ldplayer")
     imp_p.add_argument("--game", default="game")
+
+    lp_p = sub.add_parser("list-processes", help="列出预设模拟器进程")
+    lp_p.add_argument("--preset", default="ldplayer")
+
+    api_p = sub.add_parser("api", help="启动 Headless JSON API")
+    api_p.add_argument("--host", default="127.0.0.1")
+    api_p.add_argument("--port", type=int, default=17860)
+    api_p.add_argument("--json-logs", action="store_true")
 
     return p
 
@@ -131,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         "import-scc",
         "profile-migrate",
         "scc-recheck",
+        "list-processes",
+        "api",
     }
     if argv[0] in subcommands:
         args = build_parser().parse_args(argv)
@@ -146,6 +161,13 @@ def main(argv: list[str] | None = None) -> int:
             return run_profile_migrate(args)
         if args.command == "scc-recheck":
             return run_scc_recheck(args)
+        if args.command == "list-processes":
+            return run_list_processes(args)
+        if args.command == "api":
+            from ce_base_extractor.api.server import run_server
+
+            run_server(args.host, args.port, json_logs=args.json_logs)
+            return 0
         return run_import_scc(args)
 
     legacy = _build_legacy_parser()
