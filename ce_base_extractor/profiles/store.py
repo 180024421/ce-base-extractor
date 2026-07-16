@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +34,7 @@ class GameProfile:
     target_pid: int | None = None
     android_package: str = ""
     chains: list[dict] = field(default_factory=list)
+    signatures: list[dict] = field(default_factory=list)
     snapshots: dict[str, dict] = field(default_factory=dict)
     updated_at: str = ""
     version: int = 1
@@ -48,6 +49,7 @@ class GameProfile:
         target_pid: int | None = None,
         android_package: str = "",
         snapshots: dict[str, dict] | None = None,
+        signatures: list[dict] | None = None,
     ) -> GameProfile:
         chains = []
         for i, c in enumerate(result.chains, 1):
@@ -70,6 +72,7 @@ class GameProfile:
             target_pid=target_pid,
             android_package=android_package,
             chains=chains,
+            signatures=list(signatures or []),
             snapshots=dict(snapshots or {}),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -139,6 +142,8 @@ class ProfileStore:
                 profile.version = int(existing.get("version", 1)) + 1
                 if not profile.snapshots and existing.get("snapshots"):
                     profile.snapshots = existing["snapshots"]
+                if not profile.signatures and existing.get("signatures"):
+                    profile.signatures = existing["signatures"]
             except (json.JSONDecodeError, TypeError):
                 profile.version = 2
         else:
@@ -160,14 +165,20 @@ class ProfileStore:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError(f"配置 JSON 损坏: {path}") from exc
-        return GameProfile(**data)
+        data.setdefault("signatures", [])
+        known = {f.name for f in fields(GameProfile)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        return GameProfile(**filtered)
 
     def load_version(self, game_name: str, version_id: str) -> GameProfile:
         path = self.directory / game_name / "versions" / f"{version_id}.json"
         if not path.is_file():
             raise FileNotFoundError(f"历史版本不存在: {game_name}/{version_id}")
         data = json.loads(path.read_text(encoding="utf-8"))
-        return GameProfile(**data)
+        data.setdefault("signatures", [])
+        known = {f.name for f in fields(GameProfile)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        return GameProfile(**filtered)
 
     def delete(self, game_name: str) -> None:
         self._game_path(game_name).unlink(missing_ok=True)

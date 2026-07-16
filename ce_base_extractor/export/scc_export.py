@@ -15,6 +15,7 @@ def result_to_scc_json(
     *,
     snapshots: dict[str, dict] | None = None,
     android_package: str = "",
+    signatures: list[dict] | None = None,
 ) -> str:
     preset = get_preset(preset_id)
     payload = {
@@ -26,6 +27,7 @@ def result_to_scc_json(
         "source": result.source_file,
         "live_probe_meta": result.live_probe_meta,
         "snapshots": snapshots or {},
+        "signatures": signatures or [],
         "chains": [
             {
                 "name": c.export_name(i + 1),
@@ -52,6 +54,7 @@ def save_scc_json(
     *,
     snapshots: dict[str, dict] | None = None,
     android_package: str = "",
+    signatures: list[dict] | None = None,
 ) -> Path:
     path = Path(output)
     path.write_text(
@@ -60,6 +63,7 @@ def save_scc_json(
             preset_id,
             snapshots=snapshots,
             android_package=android_package,
+            signatures=signatures,
         ),
         encoding="utf-8",
     )

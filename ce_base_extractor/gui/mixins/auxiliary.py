@@ -85,6 +85,9 @@ class AuxMixin:
             row, text="开始监控", style="Accent.TButton", command=self._toggle_monitor
         )
         self.monitor_btn.pack(side=tk.LEFT)
+        ttk.Button(row, text="送特征码采样", command=self._monitor_send_to_sig).pack(
+            side=tk.LEFT, padx=(12, 0)
+        )
 
         mon_grp = make_tool_group(self._tab_monitor, "实时读数")
         mon_grp.pack(fill=tk.BOTH, expand=True)
@@ -240,6 +243,44 @@ class AuxMixin:
 
         interval = max(1, int(self.monitor_interval_var.get())) * 1000
         self._monitor_job = self.after(interval, self._monitor_tick)
+
+    def _monitor_send_to_sig(self) -> None:
+        """将监控选中字段解析为地址，送到特征码页采集样本。"""
+        if not self._result or not self._result.chains:
+            messagebox.showwarning("提示", "请先提取结果")
+            return
+        sel = self.monitor_tree.selection()
+        if not sel:
+            messagebox.showwarning("提示", "请在监控列表中选中一个字段")
+            return
+        name = self.monitor_tree.item(sel[0], "values")[0]
+        chain = next(
+            (c for i, c in enumerate(self._result.chains, 1) if c.export_name(i) == name),
+            None,
+        )
+        if chain is None:
+            messagebox.showerror("错误", f"找不到链: {name}")
+            return
+        try:
+            names = list(get_preset(self.preset_var.get()).process_names) if get_preset(self.preset_var.get()) else ["dnplayer.exe"]
+            mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
+            addr = mem.resolve_chain(
+                chain.module_name,
+                chain.module_offset,
+                chain.offsets,
+                int(self.pointer_size_var.get()),
+            )
+            mem.close()
+        except Exception as exc:
+            messagebox.showerror("解析地址失败", str(exc))
+            return
+        if hasattr(self, "_sig_capture_at"):
+            self.notebook.select(self._tab_signature)
+            self.sig_field_var.set(name)
+            self.sig_type_var.set(chain.value_type or "int32")
+            self._sig_capture_at(addr, note=f"from:{name}")
+        else:
+            messagebox.showinfo("地址", f"{name} @ 0x{addr:X}")
 
     def _refresh_profiles(self) -> None:
         games = self._profiles.list_games()

@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 
 from ce_base_extractor.gui.app_imports import HAS_WINDND, load_config, wizard_completed
-from ce_base_extractor.gui.mixins import AuxMixin, CoreMixin, CrossMixin, ExtractMixin, ShellMixin
+from ce_base_extractor.gui.mixins import AuxMixin, CoreMixin, CrossMixin, ExtractMixin, ShellMixin, SignatureMixin
 from ce_base_extractor.gui.theme import THEME, apply_theme
 from ce_base_extractor.gui.wizard import show_first_run_wizard
 from ce_base_extractor.history.store import HistoryStore
@@ -23,6 +23,7 @@ class App(
     ExtractMixin,
     CrossMixin,
     AuxMixin,
+    SignatureMixin,
 ):
     def __init__(self) -> None:
         super().__init__()

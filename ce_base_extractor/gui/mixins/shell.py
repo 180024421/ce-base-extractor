@@ -36,6 +36,7 @@ class ShellMixin:
 
         self._tab_extract = ttk.Frame(self.notebook, padding=(4, 8))
         self._tab_cross = ttk.Frame(self.notebook, padding=(4, 8))
+        self._tab_signature = ttk.Frame(self.notebook, padding=(4, 8))
         self._tab_modules = ttk.Frame(self.notebook, padding=(4, 8))
         self._tab_monitor = ttk.Frame(self.notebook, padding=(4, 8))
         self._tab_profile = ttk.Frame(self.notebook, padding=(4, 8))
@@ -43,6 +44,7 @@ class ShellMixin:
 
         self.notebook.add(self._tab_extract, text="  提取  ")
         self.notebook.add(self._tab_cross, text="  交叉验证  ")
+        self.notebook.add(self._tab_signature, text="  特征码  ")
         self.notebook.add(self._tab_modules, text="  模块  ")
         self.notebook.add(self._tab_monitor, text="  监控  ")
         self.notebook.add(self._tab_profile, text="  配置  ")
@@ -50,6 +52,7 @@ class ShellMixin:
 
         self._build_extract_tab()
         self._build_cross_tab()
+        self._build_signature_tab()
         self._build_modules_tab()
         self._build_monitor_tab()
         self._build_profile_tab()
