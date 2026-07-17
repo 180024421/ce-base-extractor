@@ -2,23 +2,16 @@
 
 ## 快速试跑（无需真实 CE 文件）
 
+**GUI**：启动后菜单「帮助 → 无 CE 试跑示例」，或底栏「试跑示例」。
+
 ```powershell
 cd E:\xiangmu\ce-base-extractor
-.\.venv\Scripts\python -m pytest tests -q
-```
-
-## 使用示例 SQLite
-
-测试套件 `tests/conftest.py` 中有内存 SQLite fixture，等价于最小 CE 导出。
-
-```powershell
-# 生成交叉验证示例库
 .\.venv\Scripts\python examples\make_sample_sqlite.py
-
-# 提取并生成 Python 脚本
-.\.venv\Scripts\python -m ce_base_extractor examples\sample_r1.sqlite --cross examples\sample_r2.sqlite --format py --game demo
-python demo_reader.py --list-processes
+.\.venv\Scripts\python -m ce_base_extractor extract examples\sample_r1.sqlite --cross examples\sample_r2.sqlite --format py --game demo
 ```
+
+日常模式默认打开「交叉验证」；勾选顶栏「高级模式」显示特征码/模块/监控/收藏。
+导出后可用「ASS 交接包」交给 Auto Script Studio。
 
 ## Il2Cpp 映射
 

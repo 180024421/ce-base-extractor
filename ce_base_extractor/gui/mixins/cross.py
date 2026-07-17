@@ -123,12 +123,14 @@ class CrossMixin:
                     0, lambda: (win.destroy(), setattr(self, "_extract_busy", False), done(result))
                 )
             except Exception as exc:
+                from ce_base_extractor.gui.errors import format_user_error
+
                 self.after(
                     0,
                     lambda e=exc: (
                         win.destroy(),
                         setattr(self, "_extract_busy", False),
-                        messagebox.showerror("交叉验证失败", str(e)),
+                        messagebox.showerror("交叉验证失败", format_user_error("", e, context="cross")),
                     ),
                 )
 

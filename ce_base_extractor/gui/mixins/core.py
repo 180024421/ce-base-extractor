@@ -139,6 +139,15 @@ class CoreMixin:
                 else f"交集: {meta.get('stable_keys', '?')} 条"
             )
         self.status_var.set(msg)
+        if hasattr(self, "_update_next_steps"):
+            self._update_next_steps(result)
+        if not result.chains:
+            from ce_base_extractor.gui.errors import empty_result_tip
+
+            messagebox.showwarning(
+                "无输出结果",
+                empty_result_tip(had_raw=result.total_raw > 0),
+            )
 
     def _extract_async(self, fn, title: str, *, use_progress: bool = False) -> None:
         self._extract_busy = True
@@ -180,9 +189,11 @@ class CoreMixin:
         self._populate_result(result)
 
     def _on_extract_error(self, exc: Exception, win: tk.Toplevel) -> None:
+        from ce_base_extractor.gui.errors import format_user_error
+
         win.destroy()
         self._extract_busy = False
-        messagebox.showerror("提取失败", str(exc))
+        messagebox.showerror("提取失败", format_user_error("", exc))
 
     def _refresh_module_panel(self, result: ExtractResult) -> None:
         for child in self.module_inner.winfo_children():

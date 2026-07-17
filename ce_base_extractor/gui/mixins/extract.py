@@ -23,7 +23,8 @@ class ExtractMixin:
             side=tk.LEFT, padx=(0, 6)
         )
         ttk.Button(primary, text="选进程", command=self._pick_process).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(primary, text="导入 SCC", command=self._import_scc).pack(side=tk.LEFT)
+        ttk.Button(primary, text="导入 SCC", command=self._import_scc).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(primary, text="ASS 交接包", command=self._export_ass_handoff).pack(side=tk.LEFT)
 
         # ── 文件卡片 ──
         self.file_var = tk.StringVar(value="尚未选择文件")
@@ -32,7 +33,23 @@ class ExtractMixin:
         )
         self._file_card.pack(fill=tk.X, pady=(0, 10))
 
-        # ── 参数区 ──
+        # ── 下一步引导 ──
+        self._next_steps = make_tool_group(self._tab_extract, "下一步（有结果后）")
+        self._next_steps.pack(fill=tk.X, pady=(0, 8))
+        ns = ttk.Frame(self._next_steps)
+        ns.pack(fill=tk.X)
+        self.next_step_var = tk.StringVar(value="先交叉验证或提取，得到结果后这里会出现快捷操作")
+        ttk.Label(ns, textvariable=self.next_step_var, style="Hint.TLabel").pack(anchor=tk.W, pady=(0, 4))
+        for text, cmd in (
+            ("智能命名", self._auto_name),
+            ("测试读取", self._test_read),
+            ("导出全部", self._export_all),
+            ("ASS 交接包", self._export_ass_handoff),
+            ("打开导出目录", self._open_export_dir),
+        ):
+            ttk.Button(ns, text=text, command=cmd).pack(side=tk.LEFT, padx=(0, 6))
+
+        # ── 参数区（日常只显示模拟器+游戏名）──
         opts = make_tool_group(self._tab_extract, "提取参数")
         opts.pack(fill=tk.X, pady=(0, 8))
 
@@ -48,33 +65,37 @@ class ExtractMixin:
         self.il2cpp_var = tk.StringVar(value=self._config.il2cpp_map_path or "")
         self.pid_label_var = tk.StringVar(value="进程: 自动")
 
-        grid = ttk.Frame(opts)
-        grid.pack(fill=tk.X)
-
-        ttk.Label(grid, text="模拟器").grid(row=0, column=0, sticky=tk.W, padx=(0, 4), pady=3)
+        basic = ttk.Frame(opts)
+        basic.pack(fill=tk.X)
+        ttk.Label(basic, text="模拟器").pack(side=tk.LEFT)
         ttk.Combobox(
-            grid,
+            basic,
             textvariable=self.preset_var,
             values=[p.id for p in PRESETS.values()],
             state="readonly",
             width=11,
-        ).grid(row=0, column=1, sticky=tk.W, padx=(0, 16), pady=3)
-        ttk.Label(grid, text="游戏名").grid(row=0, column=2, sticky=tk.W, padx=(0, 4), pady=3)
-        ttk.Entry(grid, textvariable=self.game_name_var, width=14).grid(
+        ).pack(side=tk.LEFT, padx=(4, 16))
+        ttk.Label(basic, text="游戏名").pack(side=tk.LEFT)
+        ttk.Entry(basic, textvariable=self.game_name_var, width=16).pack(side=tk.LEFT, padx=(4, 16))
+        ttk.Label(basic, textvariable=self.pid_label_var, foreground=THEME["text_secondary"]).pack(
+            side=tk.LEFT
+        )
+
+        self._extract_extra = ttk.Frame(opts)
+        grid = self._extract_extra
+
+        ttk.Label(grid, text="ptrid").grid(row=0, column=0, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Entry(grid, textvariable=self.ptrid_var, width=8).grid(row=0, column=1, sticky=tk.W, pady=3)
+        ttk.Label(grid, text="输出条数").grid(row=0, column=2, sticky=tk.W, padx=(16, 4), pady=3)
+        ttk.Spinbox(grid, from_=1, to=200, textvariable=self.top_n_var, width=8).grid(
             row=0, column=3, sticky=tk.W, padx=(0, 16), pady=3
         )
-        ttk.Label(grid, text="ptrid").grid(row=0, column=4, sticky=tk.W, padx=(0, 4), pady=3)
-        ttk.Entry(grid, textvariable=self.ptrid_var, width=8).grid(row=0, column=5, sticky=tk.W, pady=3)
-
-        ttk.Label(grid, text="输出条数").grid(row=1, column=0, sticky=tk.W, padx=(0, 4), pady=3)
-        ttk.Spinbox(grid, from_=1, to=200, textvariable=self.top_n_var, width=8).grid(
-            row=1, column=1, sticky=tk.W, padx=(0, 16), pady=3
-        )
-        ttk.Label(grid, text="最大层级").grid(row=1, column=2, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Label(grid, text="最大层级").grid(row=0, column=4, sticky=tk.W, padx=(0, 4), pady=3)
         ttk.Spinbox(grid, from_=1, to=10, textvariable=self.max_depth_var, width=8).grid(
-            row=1, column=3, sticky=tk.W, padx=(0, 16), pady=3
+            row=0, column=5, sticky=tk.W, pady=3
         )
-        ttk.Label(grid, text="最大偏移").grid(row=1, column=4, sticky=tk.W, padx=(0, 4), pady=3)
+
+        ttk.Label(grid, text="最大偏移").grid(row=1, column=0, sticky=tk.W, padx=(0, 4), pady=3)
         ttk.Spinbox(
             grid,
             from_=16,
@@ -82,15 +103,14 @@ class ExtractMixin:
             increment=16,
             textvariable=self.max_offset_var,
             width=8,
-        ).grid(row=1, column=5, sticky=tk.W, pady=3)
-
-        ttk.Label(grid, text="末级偏移(hex)").grid(row=2, column=0, sticky=tk.W, padx=(0, 4), pady=3)
+        ).grid(row=1, column=1, sticky=tk.W, pady=3)
+        ttk.Label(grid, text="末级偏移(hex)").grid(row=1, column=2, sticky=tk.W, padx=(16, 4), pady=3)
         ttk.Entry(grid, textvariable=self.end_offset_var, width=10).grid(
-            row=2, column=1, sticky=tk.W, padx=(0, 16), pady=3
+            row=1, column=3, sticky=tk.W, padx=(0, 16), pady=3
         )
 
         row2 = ttk.Frame(grid)
-        row2.grid(row=3, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+        row2.grid(row=2, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
         ttk.Label(row2, text="指针宽度").pack(side=tk.LEFT)
         ttk.Combobox(
             row2, textvariable=self.pointer_size_var, values=("4", "8"), width=5, state="readonly"
@@ -99,9 +119,9 @@ class ExtractMixin:
         ttk.Label(row2, text="Il2Cpp").pack(side=tk.LEFT)
         ttk.Entry(row2, textvariable=self.il2cpp_var, width=32).pack(side=tk.LEFT, padx=4)
         ttk.Button(row2, text="浏览", command=self._browse_il2cpp).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Label(row2, textvariable=self.pid_label_var, foreground=THEME["text_secondary"]).pack(
-            side=tk.LEFT
-        )
+
+        # 默认隐藏额外参数（高级模式再显示）
+        # _extract_extra 不 pack，直到 _show_extract_extra_params(True)
 
         # ── 导出 / 验证（双列工具组）──
         tools_row = ttk.Frame(self._tab_extract)
@@ -234,6 +254,132 @@ class ExtractMixin:
             self._adv_frame.pack(fill=tk.X, pady=(0, 8), before=self._results_paned)
         else:
             self._adv_frame.pack_forget()
+
+    def _show_extract_extra_params(self, show: bool) -> None:
+        if not hasattr(self, "_extract_extra"):
+            return
+        if show:
+            self._extract_extra.pack(fill=tk.X, pady=(6, 0))
+        else:
+            self._extract_extra.pack_forget()
+
+    def _update_next_steps(self, result: ExtractResult) -> None:
+        n = len(result.chains)
+        if n == 0:
+            self.next_step_var.set(
+                f"输出 0 条（原始 {result.total_raw}）。可放宽最大偏移/层级，或换交叉验证。"
+            )
+            return
+        self.next_step_var.set(
+            f"已得到 {n} 条 → 建议：① 智能命名 ② 测试读取 ③ 导出全部 / ASS 交接包"
+        )
+
+    def _open_export_dir(self) -> None:
+        folder = self._watch_dir() if hasattr(self, "_watch_dir") else WATCH_DIR
+        if hasattr(self, "_open_dir"):
+            self._open_dir(Path(folder))
+        else:
+            import os
+
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            os.startfile(folder)  # type: ignore[attr-defined]
+
+    def _try_sample_flow(self) -> None:
+        """无 CE：生成示例 SQLite → 交叉验证 → 展示结果。"""
+        import importlib.util
+
+        root = Path(__file__).resolve().parents[3]
+        script = root / "examples" / "make_sample_sqlite.py"
+        if not script.is_file():
+            messagebox.showerror("试跑失败", f"未找到示例脚本: {script}")
+            return
+        spec = importlib.util.spec_from_file_location("ce_make_sample_sqlite", script)
+        if spec is None or spec.loader is None:
+            messagebox.showerror("试跑失败", "无法加载示例脚本")
+            return
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ex = root / "examples"
+        ex.mkdir(parents=True, exist_ok=True)
+        r1, r2 = ex / "sample_r1.sqlite", ex / "sample_r2.sqlite"
+        mod._write(r1, 0x12345678)
+        mod._write(r2, 0x12345678)
+        self.game_name_var.set("demo_sample")
+        self._extra_files = [r1, r2]
+        if hasattr(self, "cross_list"):
+            self.cross_list.delete(0, tk.END)
+            self.cross_list.insert(tk.END, str(r1))
+            self.cross_list.insert(tk.END, str(r2))
+        self._set_file(r1)
+        self.notebook.select(self._tab_cross)
+        try:
+            result = extract(r1, config=self._current_config(), extra_files=[r2])
+            self._populate_result(result)
+            self.notebook.select(self._tab_extract)
+            messagebox.showinfo(
+                "试跑完成",
+                f"已用 examples 示例交叉验证，得到 {len(result.chains)} 条。\n"
+                "可点「智能命名 / 导出全部 / ASS 交接包」体验后续步骤。\n"
+                "真实流程请用 CE 导出的 SQLite 替换示例文件。",
+            )
+        except Exception as exc:
+            from ce_base_extractor.gui.errors import format_user_error
+
+            messagebox.showerror("试跑失败", format_user_error("", exc, context="cross"))
+
+    def _export_ass_handoff(self) -> None:
+        if not self._result or not self._result.chains:
+            messagebox.showwarning("提示", "请先提取或交叉验证得到结果")
+            return
+        game = self.game_name_var.get().strip() or "game"
+        folder = filedialog.askdirectory(
+            title="选择 ASS 交接包输出目录",
+            initialdir=str(self._watch_dir() if hasattr(self, "_watch_dir") else WATCH_DIR),
+        )
+        if not folder:
+            return
+        out = Path(folder) / f"{game}_ass_handoff"
+        out.mkdir(parents=True, exist_ok=True)
+        snapshots, android_pkg = self._export_snapshots_context()
+        files = export_all(
+            self._result,
+            out,
+            game_name=game,
+            preset_id=self.preset_var.get(),
+            pointer_size=int(self.pointer_size_var.get()),
+            target_pid=self._target_pid,
+            android_package=android_pkg,
+            snapshots=snapshots,
+        )
+        readme = out / "README_ASS交接.txt"
+        readme.write_text(
+            "\n".join(
+                [
+                    f"# {game} → Auto Script Studio 交接说明",
+                    "",
+                    "本目录由 CE 基址提取器「ASS 交接包」生成。",
+                    "",
+                    "【放入 Studio 工程】",
+                    "1. 打开 Auto Script Studio，打开或新建你的脚本工程",
+                    "2. 将本目录中的 Lua / SCC JSON 复制到工程（如 lib/ 或根目录）",
+                    "3. 在 main.lua 中按导出脚本注释调用 bot.load_bases / mem.read_chain",
+                    "",
+                    "【重要限制】",
+                    "• 读内存需要 APK + root（PC 联调会明确报 not supported）",
+                    "• 先用 Studio「打包并安装」debug 包，再热替换脚本",
+                    "• 游戏更新后请重新交叉验证并导出",
+                    "",
+                    f"已导出文件数: {len(files)}",
+                    f"游戏名: {game}",
+                    f"模拟器预设: {self.preset_var.get()}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        if hasattr(self, "_open_dir"):
+            self._open_dir(out)
+        messagebox.showinfo("ASS 交接包", f"已生成到:\n{out}\n\n请阅读 README_ASS交接.txt")
+        self.status_var.set(f"ASS 交接包: {out}")
 
     def _run_extract(self) -> None:
         if not self._current_file:
