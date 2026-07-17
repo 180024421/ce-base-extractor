@@ -153,7 +153,14 @@ def make_tool_group(parent: tk.Misc, title: str) -> ttk.LabelFrame:
 class FileDropCard(tk.Frame):
     """文件选择卡片（拖放提示 + 路径展示）。"""
 
-    def __init__(self, parent: tk.Misc, textvariable: tk.StringVar, **kwargs) -> None:
+    def __init__(
+        self,
+        parent: tk.Misc,
+        textvariable: tk.StringVar,
+        *,
+        allow_drop: bool = True,
+        **kwargs,
+    ) -> None:
         super().__init__(
             parent,
             bg=THEME["surface"],
@@ -167,9 +174,14 @@ class FileDropCard(tk.Frame):
         inner = tk.Frame(self, bg=THEME["surface"], padx=16, pady=12)
         inner.pack(fill=tk.BOTH, expand=True)
 
+        hint = (
+            "拖放 CE 导出文件到窗口，或点击「选择文件」"
+            if allow_drop
+            else "点击「选择文件」选择 CE 导出的 SQLite / PTR"
+        )
         self._hint = tk.Label(
             inner,
-            text="拖放 CE 导出文件到窗口，或点击「选择文件」",
+            text=hint,
             font=FONTS["subtitle"],
             fg=THEME["text_muted"],
             bg=THEME["surface"],

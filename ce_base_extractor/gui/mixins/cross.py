@@ -109,10 +109,12 @@ class CrossMixin:
         win.geometry("360x100")
         win.transient(self)
         win.configure(bg=THEME["bg"])
-        ttk.Label(win, text="正在交叉验证，大文件可能较慢…").pack(pady=(16, 6))
+        ttk.Label(win, text="正在交叉验证，大文件可能较慢…").pack(pady=(16, 4))
+        prog_label = ttk.Label(win, text="请稍候，勿关闭窗口")
+        prog_label.pack()
         bar = ttk.Progressbar(win, mode="indeterminate")
         bar.pack(fill=tk.X, padx=20, pady=4)
-        bar.start(10)
+        bar.start(12)
 
         def work() -> None:
             try:

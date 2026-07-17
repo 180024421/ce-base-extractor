@@ -62,6 +62,7 @@ class ExtractConfig:
     stream_single_file: bool = True
     cross_validate_sqlite_threshold: int = 200_000
     cross_validate_force_sqlite: bool = False
+    watch_dir: str = ""
 
     def validate(self) -> ExtractConfig:
         if self.top_n < 1:

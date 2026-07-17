@@ -57,6 +57,7 @@ class CoreMixin:
             fuzzy_dedupe=bool(self.fuzzy_var.get()),
             stream_single_file=bool(self.stream_var.get()),
             sqlite_module_prefilter=self._config.sqlite_module_prefilter,
+            watch_dir=str(self._watch_dir()),
         )
 
     def _on_drop(self, files: list[bytes]) -> None:
@@ -91,8 +92,9 @@ class CoreMixin:
             ids = list_ptrids(path) if path.suffix.lower() in (".sqlite", ".db", ".sqlite3") else []
             if ids:
                 self.ptrid_var.set(str(ids[-1]))
-        except Exception:
-            pass
+        except Exception as exc:
+            self.status_var.set(f"已选择: {path.name}（读取 ptrid 失败: {exc}）")
+            return
         self.status_var.set(f"已选择: {path.name}")
 
     def _populate_result(self, result: ExtractResult) -> None:
@@ -143,26 +145,25 @@ class CoreMixin:
         self.status_var.set(title)
         win = tk.Toplevel(self)
         win.title(title)
-        win.geometry("320x90")
+        win.geometry("360x110")
         win.transient(self)
         ttk.Label(win, text=title).pack(pady=(12, 4))
-        prog_label = ttk.Label(win, text="")
+        prog_label = ttk.Label(win, text="准备中…")
         prog_label.pack()
-        bar = ttk.Progressbar(win, mode="indeterminate" if not use_progress else "determinate")
+        # 行数未知时用 indeterminate；有回调时仍用脉冲条 + 行数文案，避免假进度卡住
+        bar = ttk.Progressbar(win, mode="indeterminate")
         bar.pack(fill=tk.X, padx=16, pady=4)
-        if use_progress:
-            bar.configure(maximum=100, value=0)
-        else:
-            bar.start(10)
+        bar.start(12)
 
         def work() -> None:
             try:
                 if use_progress:
-                    last = [0]
 
                     def on_progress(n: int) -> None:
-                        last[0] = n
-                        self.after(0, lambda: prog_label.config(text=f"已扫描 {n} 行"))
+                        self.after(
+                            0,
+                            lambda n=n: prog_label.config(text=f"已扫描 {n:,} 行（处理中…）"),
+                        )
 
                     result = fn(on_progress)
                 else:

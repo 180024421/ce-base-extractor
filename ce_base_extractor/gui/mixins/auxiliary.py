@@ -114,7 +114,7 @@ class AuxMixin:
         row = ttk.Frame(self._tab_profile)
         row.pack(fill=tk.X, pady=(0, 10))
         for text, cmd in (
-            ("保存配置", self._save_profile),
+            ("保存游戏 Profile", self._save_profile),
             ("加载", self._load_profile),
             ("复检", self._profile_recheck),
             ("版本对比", self._profile_migrate),
@@ -126,7 +126,7 @@ class AuxMixin:
         self.profile_var = tk.StringVar()
         pick_row = ttk.Frame(self._tab_profile)
         pick_row.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(pick_row, text="游戏配置").pack(side=tk.LEFT)
+        ttk.Label(pick_row, text="游戏 Profile").pack(side=tk.LEFT)
         self.profile_combo = ttk.Combobox(
             pick_row, textvariable=self.profile_var, state="readonly", width=32
         )
@@ -240,6 +240,10 @@ class AuxMixin:
                 self._monitor_mem.close()
                 self._monitor_mem = None
             self._monitor_errors = 0
+            self._monitor_running = False
+            self.monitor_btn.configure(text="开始监控")
+            messagebox.showerror("监控已停止", str(exc))
+            return
 
         interval = max(1, int(self.monitor_interval_var.get())) * 1000
         self._monitor_job = self.after(interval, self._monitor_tick)

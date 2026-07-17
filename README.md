@@ -41,19 +41,34 @@ flowchart LR
 | GUI 高级选项 | live_probe、模糊去重、增量交叉监视 |
 | CLI | diff / verify / watch / import-scc / profile-migrate / scc-recheck |
 
-## 快速开始
+## 快速开始（首次 5 分钟）
 
 ```powershell
 cd E:\xiangmu\ce-base-extractor
-.\安装环境.cmd
-.\一键启动.cmd
+.\安装环境.cmd          # 自动找 py / python，缺 Tkinter 会提示
+.\一键启动.cmd          # 打开 GUI
 ```
+
+无 CE 也可先试跑：见 [examples/README.md](examples/README.md)。
+
+### GUI 页签地图
+
+| 页签 | 做什么 |
+|------|--------|
+| 提取 | 选 SQLite/PTR → 提取 → 命名/导出/记录读数 → 重启验证 |
+| 交叉验证 | ≥2 份 Rescan 取交集（推荐主路径） |
+| 特征码 | ≥3 样本生成 AOB → 扫描 → 写入游戏 Profile |
+| 模块 / 监控 | 白名单与实时读链 |
+| 游戏 Profile | 按游戏保存链与快照（≠ 底栏「保存默认参数」） |
+| 收藏 | 历史收藏 |
+
+菜单 **帮助 → 流程说明** 可随时重开向导。排障见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 
 ### 命令行
 
 ```powershell
 # 交叉验证 + 全量导出
-.\.venv\Scripts\python -m ce_base_extractor r1.sqlite --cross r2.sqlite r3.sqlite `
+.\.venv\Scripts\python -m ce_base_extractor extract r1.sqlite --cross r2.sqlite r3.sqlite `
   --format all --game mygame -o ./mygame_export
 
 # 增量交叉监视
@@ -68,6 +83,8 @@ cd E:\xiangmu\ce-base-extractor
 # SCC 定时复检
 .\.venv\Scripts\python -m ce_base_extractor scc-recheck --profile mygame
 ```
+
+可选打包 EXE：`.\build_exe.ps1`（需本机已装 PyInstaller）。
 
 ## 开发
 

@@ -27,7 +27,9 @@ class ExtractMixin:
 
         # ── 文件卡片 ──
         self.file_var = tk.StringVar(value="尚未选择文件")
-        self._file_card = FileDropCard(self._tab_extract, self.file_var)
+        self._file_card = FileDropCard(
+            self._tab_extract, self.file_var, allow_drop=HAS_WINDND
+        )
         self._file_card.pack(fill=tk.X, pady=(0, 10))
 
         # ── 参数区 ──
@@ -72,11 +74,23 @@ class ExtractMixin:
         ttk.Spinbox(grid, from_=1, to=10, textvariable=self.max_depth_var, width=8).grid(
             row=1, column=3, sticky=tk.W, padx=(0, 16), pady=3
         )
-        ttk.Label(grid, text="末级偏移(hex)").grid(row=1, column=4, sticky=tk.W, padx=(0, 4), pady=3)
-        ttk.Entry(grid, textvariable=self.end_offset_var, width=10).grid(row=1, column=5, sticky=tk.W, pady=3)
+        ttk.Label(grid, text="最大偏移").grid(row=1, column=4, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Spinbox(
+            grid,
+            from_=16,
+            to=65536,
+            increment=16,
+            textvariable=self.max_offset_var,
+            width=8,
+        ).grid(row=1, column=5, sticky=tk.W, pady=3)
+
+        ttk.Label(grid, text="末级偏移(hex)").grid(row=2, column=0, sticky=tk.W, padx=(0, 4), pady=3)
+        ttk.Entry(grid, textvariable=self.end_offset_var, width=10).grid(
+            row=2, column=1, sticky=tk.W, padx=(0, 16), pady=3
+        )
 
         row2 = ttk.Frame(grid)
-        row2.grid(row=2, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
+        row2.grid(row=3, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
         ttk.Label(row2, text="指针宽度").pack(side=tk.LEFT)
         ttk.Combobox(
             row2, textvariable=self.pointer_size_var, values=("4", "8"), width=5, state="readonly"
@@ -114,6 +128,10 @@ class ExtractMixin:
         verify_grp.grid(row=0, column=1, sticky=tk.NSEW, padx=(6, 0))
         ver_inner = ttk.Frame(verify_grp)
         ver_inner.pack(fill=tk.X)
+        self.verify_step_var = tk.StringVar(value="步骤: ① 记录读数 → ② 重启模拟器 → ③ 重启验证")
+        ttk.Label(ver_inner, textvariable=self.verify_step_var, style="Hint.TLabel").grid(
+            row=0, column=0, columnspan=4, sticky=tk.W, pady=(0, 4)
+        )
         for i, (text, cmd) in enumerate(
             [
                 ("记录读数", self._snapshot_values),
@@ -122,7 +140,7 @@ class ExtractMixin:
                 ("智能命名", self._auto_name),
             ]
         ):
-            ttk.Button(ver_inner, text=text, command=cmd).grid(row=0, column=i, padx=3, pady=2)
+            ttk.Button(ver_inner, text=text, command=cmd).grid(row=1, column=i, padx=3, pady=2)
 
         # ── 高级选项（可折叠）──
         self._adv_visible = tk.BooleanVar(value=False)
@@ -288,18 +306,51 @@ class ExtractMixin:
     def _pick_process(self) -> None:
         preset = get_preset(self.preset_var.get())
         names = list(preset.process_names) if preset else ["dnplayer.exe"]
+        label = preset.label if preset else "模拟器"
         try:
             processes = ProcessMemory.list_matching(names)
         except OSError as exc:
             messagebox.showerror("错误", str(exc))
             return
         if not processes:
-            messagebox.showwarning("提示", "未找到雷电进程，请先启动模拟器")
+            messagebox.showwarning(
+                "提示",
+                f"未找到「{label}」进程，请先启动模拟器，或在提取参数中切换「模拟器」预设。",
+            )
             return
         picked = pick_process(self, processes)
         if picked:
             self._target_pid = picked.pid
             self.pid_label_var.set(f"进程: {picked.label}")
+
+    def _ensure_profile_for_snapshots(self, game: str) -> bool:
+        """记录读数写入 Profile；不存在时引导创建。"""
+        try:
+            self._profiles.load(game)
+            return True
+        except FileNotFoundError:
+            pass
+        if not self._result:
+            return False
+        if not messagebox.askyesno(
+            "保存游戏 Profile",
+            f"尚未保存游戏 Profile「{game}」。\n"
+            "记录读数需要写入 Profile 才能持久化，是否现在创建并保存？",
+        ):
+            return False
+        profile = GameProfile.from_result(
+            self._result,
+            game_name=game,
+            preset=self.preset_var.get(),
+            pointer_size=int(self.pointer_size_var.get()),
+            target_pid=self._target_pid,
+            android_package=self.android_pkg_var.get().strip(),
+        )
+        self._profiles.save(profile)
+        if hasattr(self, "_refresh_profiles"):
+            self._refresh_profiles()
+            self.profile_var.set(game)
+        return True
 
     def _snapshot_values(self) -> None:
         if not self._result:
@@ -307,6 +358,7 @@ class ExtractMixin:
         try:
             preset = get_preset(self.preset_var.get())
             names = list(preset.process_names) if preset else ["dnplayer.exe"]
+            emu_label = preset.label if preset else "模拟器"
             mem = ProcessMemory.auto_attach(names, pid=self._target_pid)
             self._before_verify.clear()
             failed: list[str] = []
@@ -319,26 +371,35 @@ class ExtractMixin:
                         )
                     except Exception:
                         failed.append(name)
-            msg = f"已记录 {len(self._before_verify)} 个字段\n请重启雷电后点「重启验证」"
+            self.verify_step_var.set("步骤: ① 已记录 → ② 请重启模拟器 → ③ 点「重启验证」")
+            msg = (
+                f"已记录 {len(self._before_verify)} 个字段\n"
+                f"请重启「{emu_label}」后点「重启验证」"
+            )
             if failed:
                 msg += f"\n\n读取失败 {len(failed)} 个: {', '.join(failed[:8])}"
                 if len(failed) > 8:
                     msg += " …"
             messagebox.showinfo("记录读数", msg)
             game = self.game_name_var.get().strip()
-            if game:
+            if game and self._ensure_profile_for_snapshots(game):
                 try:
                     profile = self._profiles.load(game)
                     profile.record_snapshots(self._before_verify)
                     self._profiles.save(profile)
-                except FileNotFoundError:
-                    pass
+                except Exception as exc:
+                    messagebox.showwarning("Profile 写入", f"读数已记录到本次会话，但写入 Profile 失败: {exc}")
         except Exception as exc:
             messagebox.showerror("失败", str(exc))
 
     def _restart_verify(self) -> None:
         if not self._result or not self._before_verify:
-            messagebox.showwarning("提示", "请先点「记录读数」再重启模拟器")
+            messagebox.showwarning("提示", "请先点「记录读数」，重启模拟器后再点「重启验证」")
+            return
+        if not messagebox.askyesno(
+            "重启验证",
+            "请确认已重启模拟器且游戏已重新进入目标界面。\n现在开始对比读数？",
+        ):
             return
         results = verify_restart_stability(
             self._result.chains,
@@ -388,6 +449,9 @@ class ExtractMixin:
         self._populate_result(self._result)
         game = self.game_name_var.get().strip() or "未命名游戏"
         self._history.mark_verified(game, verified_names)
+        self.verify_step_var.set(
+            f"步骤: 完成 — 稳定 {len(verified_names)}/{len(results)}；可再「记录读数」开始下一轮"
+        )
         messagebox.showinfo("重启验证", "\n".join(lines[:15]))
 
     def _export_snapshots_context(self) -> tuple[dict[str, dict] | None, str]:
@@ -533,7 +597,7 @@ class ExtractMixin:
         if not self._result:
             messagebox.showwarning("提示", "请先提取结果")
             return
-        folder = filedialog.askdirectory(initialdir=str(WATCH_DIR))
+        folder = filedialog.askdirectory(initialdir=str(self._watch_dir() if hasattr(self, "_watch_dir") else WATCH_DIR))
         if not folder:
             return
         game = self.game_name_var.get().strip() or "game"

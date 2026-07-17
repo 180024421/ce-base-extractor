@@ -66,7 +66,7 @@ class SignatureMixin:
 
         ttk.Label(
             self._tab_signature,
-            text="① 采 ≥3 样本（重启同址 或 同局多址） ② 生成/精简 ③ 扫描验证 ④ 写入配置/导出。可粘贴多行地址一次采集。",
+            text="① 采 ≥3 样本（重启同址 或 同局多址） ② 生成/精简 ③ 扫描验证 ④ 写入游戏 Profile / 导出。可粘贴多行地址一次采集。",
             style="Hint.TLabel",
         ).pack(anchor=tk.W, pady=(0, 4))
         self._sig_show_guide_once()
@@ -160,10 +160,13 @@ class SignatureMixin:
             side=tk.LEFT, padx=(0, 4)
         )
         ttk.Button(act, text="精简唯一", command=self._sig_minimize).pack(side=tk.LEFT, padx=2)
-        ttk.Button(act, text="扫描验证", command=self._sig_scan).pack(side=tk.LEFT, padx=2)
+        self.sig_scan_btn = ttk.Button(act, text="扫描验证", command=self._sig_scan)
+        self.sig_scan_btn.pack(side=tk.LEFT, padx=2)
         ttk.Button(act, text="读值验证", command=self._sig_read_value).pack(side=tk.LEFT, padx=2)
         ttk.Button(act, text="复制", command=self._sig_copy).pack(side=tk.LEFT, padx=2)
-        ttk.Button(act, text="写入配置", command=self._sig_save_profile).pack(side=tk.LEFT, padx=(12, 2))
+        ttk.Button(act, text="写入游戏 Profile", command=self._sig_save_profile).pack(
+            side=tk.LEFT, padx=(12, 2)
+        )
         ttk.Button(act, text="导出向导", command=self._sig_export_wizard).pack(side=tk.LEFT, padx=2)
         ttk.Button(act, text="导出脚本", command=self._sig_export_all).pack(side=tk.LEFT, padx=2)
 
@@ -305,8 +308,8 @@ class SignatureMixin:
                 value_type=self.sig_type_var.get(),
                 module_hint=self.sig_module_var.get().strip(),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            messagebox.showwarning("历史记录", f"特征码已生成，但写入历史失败: {exc}")
         self.status_var.set(f"已生成特征码（固定 {gen.fixed_bytes}）")
 
     def _sig_minimize(self) -> None:
@@ -314,6 +317,8 @@ class SignatureMixin:
             messagebox.showwarning("提示", "请先生成特征码")
             return
         module = self.sig_module_var.get().strip() or None
+        self.sig_progress["value"] = 0
+        self.sig_progress_label.set("精简中…")
 
         def work():
             try:
@@ -330,10 +335,22 @@ class SignatureMixin:
 
                 gen = minimize_unique_pattern(self._sig_last, count_fn, max_hits=1)
                 mem.close()
-                self.after(0, lambda: self._sig_show_gen(gen))
-                self.after(0, lambda: self.status_var.set("精简完成" if gen.minimized else "无法再精简"))
+
+                def done():
+                    self._sig_show_gen(gen)
+                    self.sig_progress["value"] = 100
+                    self.sig_progress_label.set("精简完成" if gen.minimized else "无法再精简")
+                    self.status_var.set("精简完成" if gen.minimized else "无法再精简")
+
+                self.after(0, done)
             except Exception as exc:
-                self.after(0, lambda e=exc: messagebox.showerror("精简失败", str(e)))
+                self.after(
+                    0,
+                    lambda e=exc: (
+                        self.sig_progress_label.set("失败"),
+                        messagebox.showerror("精简失败", str(e)),
+                    ),
+                )
 
         threading.Thread(target=work, daemon=True).start()
         self.status_var.set("正在精简（后台扫描）…")
@@ -345,9 +362,12 @@ class SignatureMixin:
             return
         if self._sig_busy:
             self._sig_scan_cancel = True
+            self.sig_scan_btn.configure(text="取消中…")
+            self.sig_progress_label.set("取消中…")
             return
         self._sig_busy = True
         self._sig_scan_cancel = False
+        self.sig_scan_btn.configure(text="取消扫描")
         module = self.sig_module_var.get().strip() or None
         region_mode = self.sig_region_mode_var.get() if hasattr(self, "sig_region_mode_var") else "all"
         stop_unique = bool(self.sig_stop_unique_var.get()) if hasattr(self, "sig_stop_unique_var") else False
@@ -383,11 +403,13 @@ class SignatureMixin:
 
     def _sig_on_scan_fail(self, msg: str) -> None:
         self._sig_busy = False
+        self.sig_scan_btn.configure(text="扫描验证")
         self.sig_progress_label.set("失败")
         messagebox.showerror("扫描失败", msg)
 
     def _sig_on_scan_done(self, hits: list[int]) -> None:
         self._sig_busy = False
+        self.sig_scan_btn.configure(text="扫描验证")
         self._sig_hits = hits
         self.sig_progress["value"] = 100
         self.sig_progress_label.set(f"命中 {len(hits)}")
@@ -512,7 +534,7 @@ class SignatureMixin:
         profile.signatures = sigs
         profile.target_pid = self._target_pid
         path = self._profiles.save(profile)
-        messagebox.showinfo("已写入配置", f"{saved.field_name} → {path}")
+        messagebox.showinfo("已写入游戏 Profile", f"{saved.field_name} → {path}")
         self.status_var.set(f"特征码已写入 Profile: {game}")
 
     def _sig_export_all(self) -> None:
@@ -600,7 +622,7 @@ class SignatureMixin:
                 "特征码三步",
                 "1. 选进程，填地址点「采集样本」（≥3：可重启重采，或同局多个同类地址）\n"
                 "2. 「生成特征码」→ 可选「精简唯一」→「扫描验证」\n"
-                "3. 「写入配置」或「导出向导」给 Python / ASS 使用\n\n"
+                "3. 「写入游戏 Profile」或「导出向导」给 Python / ASS 使用\n\n"
                 "也可从「监控」页把读成功的链地址送到本页采样。",
             ),
         )
